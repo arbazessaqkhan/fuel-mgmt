@@ -21,6 +21,12 @@ export const voucherCreateSchema = z.object({
     .refine((s) => !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime()), {
       message: "Date is not a valid calendar date",
     }),
+  imageUrl: z
+    .string()
+    .trim()
+    .max(500, "Image URL too long")
+    .regex(/^\/uploads\/[A-Za-z0-9._-]+$/, "Image URL must be a local /uploads/ path")
+    .nullish(),
 });
 
 export const voucherUpdateSchema = voucherCreateSchema.partial();

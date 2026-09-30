@@ -9,6 +9,9 @@ import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { UploadZone } from "@/components/scanner/upload-zone";
 import { VoucherForm } from "@/components/scanner/voucher-form";
+import { BulkUpload } from "@/components/scanner/bulk-upload";
+import { Layers } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function ScanPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -123,6 +126,17 @@ export default function ScanPage() {
         </p>
       </div>
 
+      <Tabs defaultValue="single" className="space-y-6">
+        <TabsList className="h-11 rounded-full p-1">
+          <TabsTrigger value="single" className="rounded-full px-5">
+            <ScanLine className="mr-2 h-4 w-4" /> Single voucher
+          </TabsTrigger>
+          <TabsTrigger value="bulk" className="rounded-full px-5">
+            <Layers className="mr-2 h-4 w-4" /> Bulk upload (PDF)
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="single" className="space-y-6">
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="card-premium border-border/60">
           <CardHeader>
@@ -150,7 +164,7 @@ export default function ScanPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <VoucherForm ocr={ocr} onSubmit={() => {/* keep image so user can rescan similar */}} />
+            <VoucherForm ocr={ocr} imageUrl={previewUrl} onSubmit={() => {/* keep image so user can rescan similar */}} />
             {ocr && (
               <>
                 <Separator className="my-4" />
@@ -165,6 +179,26 @@ export default function ScanPage() {
           </CardContent>
         </Card>
       </div>
+        </TabsContent>
+
+        <TabsContent value="bulk">
+          <Card className="card-premium border-border/60">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Layers className="h-4 w-4" /> Bulk voucher extraction
+              </CardTitle>
+              <CardDescription>
+                Upload a PDF of scanned vouchers (or a photo of a ledger page). Every
+                distinct voucher entry is extracted for you to review and edit before
+                saving the batch.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <BulkUpload />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

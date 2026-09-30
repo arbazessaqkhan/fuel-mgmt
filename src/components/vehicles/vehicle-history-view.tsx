@@ -4,7 +4,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, CalendarRange, Droplets, FileText, Gauge, TrendingUp } from "lucide-react";
+import { ArrowLeft, CalendarRange, Droplets, FileSpreadsheet, FileText, Gauge, TrendingUp } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -32,6 +33,7 @@ interface HistoryData {
     voucherNo: string;
     liters: number;
     date: string;
+    imageUrl?: string | null;
   }>;
 }
 
@@ -58,6 +60,40 @@ const WINDOW_OPTIONS = [6, 12, 24];
 
 const fmt = (n: number, digits = 2) =>
   new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(n);
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+function monthStartIso(): string {
+  const n = new Date();
+  return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), 1)).toISOString().slice(0, 10);
+}
+function daysAgoIso(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function PresetButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={
+        "rounded-full border px-3 py-1 text-xs font-medium transition-colors " +
+        (active
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground")
+      }
+    >
+      {label}
+    </button>
+  );
+}
+
+function endOfMonthIso(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
 
 function monthLabel(key: string) {
   const [y, m] = key.split("-").map(Number);
@@ -94,24 +130,27 @@ function HistoryTooltip({ active, payload, label }: { active?: boolean; payload?
 }
 
 export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
-  // Selected month (dashboard-style): one month + year, options limited to
-  // months that actually have data for this vehicle.
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  // Custom date range (day precision): start + end date inputs, presets.
+  const [range, setRange] = useState<{ from: string | null; to: string | null }>({
+    from: null,
+    to: null,
+  });
   const [data, setData] = useState<HistoryData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rangeError, setRangeError] = useState<string | null>(null);
 
   const load = useCallback(
-    async (month: string | null) => {
+    async (from: string | null, to: string | null) => {
       setLoading(true);
       setNotFound(false);
       setError(null);
       try {
         const params = new URLSearchParams();
-        if (month) {
-          params.set("from", month);
-          params.set("to", month);
+        if (from && to) {
+          params.set("from", from);
+          params.set("to", to);
         }
         const res = await fetch(
           `/api/vehicles/${encodeURIComponent(vehicleNo)}/history?${params}`
@@ -131,19 +170,33 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
     [vehicleNo]
   );
 
+  const applyRange = useCallback(
+    (from: string | null, to: string | null) => {
+      if (from && to && from > to) {
+        setRangeError("End date must be on or after the start date.");
+        return;
+      }
+      setRangeError(null);
+      setRange({ from, to });
+    },
+    []
+  );
+
   useEffect(() => {
-    load(selectedMonth);
+    load(range.from, range.to);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load, selectedMonth]);
+  }, [load, range]);
 
-  // After the first load, default to the most recent month with data.
+  // After the first load, default to the vehicle's full data span.
   useEffect(() => {
-    if (data && selectedMonth === null && data.availableMonths.length > 0) {
-      setSelectedMonth(data.availableMonths[data.availableMonths.length - 1]);
+    if (data && range.from === null && range.to === null && data.availableMonths.length > 0) {
+      setRange({
+        from: `${data.availableMonths[0]}-01`,
+        to: endOfMonthIso(data.availableMonths[data.availableMonths.length - 1]),
+      });
     }
-  }, [data, selectedMonth]);
-
-  // Dropdown options come ONLY from months with real data for this vehicle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   if (notFound) {
     return (
@@ -226,57 +279,69 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
             Month-by-month fuel consumption over time.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            value={selectedMonth ? selectedMonth.split("-")[1] : undefined}
-            onValueChange={(m) => {
-              const year = selectedMonth ? selectedMonth.split("-")[0] : String(new Date().getUTCFullYear());
-              const next = data?.availableMonths.includes(`${year}-${m}`)
-                ? `${year}-${m}`
-                : data?.availableMonths.find((k) => k.endsWith(`-${m}`));
-              if (next) setSelectedMonth(next);
-            }}
-          >
-            <SelectTrigger className="w-36" aria-label="Select month">
-              <SelectValue placeholder="Month" />
-            </SelectTrigger>
-            <SelectContent>
-              {(() => {
-                const seen = new Set<string>();
-                return data?.availableMonths
-                  .map((k) => k.split("-")[1])
-                  .filter((m) => (seen.has(m) ? false : (seen.add(m), true)))
-                  .map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {new Date(Date.UTC(2000, Number(m) - 1, 1)).toLocaleDateString("en-US", { month: "long", timeZone: "UTC" })}
-                    </SelectItem>
-                  ));
-              })()}
-            </SelectContent>
-          </Select>
-          <Select
-            value={selectedMonth ? selectedMonth.split("-")[0] : undefined}
-            onValueChange={(y) => {
-              const month = selectedMonth ? selectedMonth.split("-")[1] : null;
-              const next = month && data?.availableMonths.includes(`${y}-${month}`)
-                ? `${y}-${month}`
-                : data?.availableMonths.find((k) => k.startsWith(`${y}-`));
-              if (next) setSelectedMonth(next);
-            }}
-          >
-            <SelectTrigger className="w-28" aria-label="Select year">
-              <SelectValue placeholder="Year" />
-            </SelectTrigger>
-            <SelectContent>
-              {Array.from(new Set((data?.availableMonths ?? []).map((k) => k.split("-")[0]))).map((y) => (
-                <SelectItem key={y} value={y}>
-                  {y}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <div className="flex items-center gap-2">
+            <div className="grid flex-1 gap-1 sm:w-44">
+              <label htmlFor="range-from" className="text-[11px] font-medium text-muted-foreground">
+                Start Date
+              </label>
+              <Input
+                id="range-from"
+                type="date"
+                value={range.from ?? ""}
+                max={range.to ?? undefined}
+                onChange={(e) => applyRange(e.target.value || null, range.to)}
+                aria-label="Start date"
+              />
+            </div>
+            <span className="mt-4 text-muted-foreground">–</span>
+            <div className="grid flex-1 gap-1 sm:w-44">
+              <label htmlFor="range-to" className="text-[11px] font-medium text-muted-foreground">
+                End Date
+              </label>
+              <Input
+                id="range-to"
+                type="date"
+                value={range.to ?? ""}
+                min={range.from ?? undefined}
+                onChange={(e) => applyRange(range.from, e.target.value || null)}
+                aria-label="End date"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 sm:mt-4">
+            <PresetButton
+              label="All time"
+              active={range.from === `${data?.availableMonths[0]}-01` && range.to === endOfMonthIso(data?.availableMonths[data.availableMonths.length - 1] ?? "")}
+              onClick={() =>
+                data &&
+                applyRange(`${data.availableMonths[0]}-01`, endOfMonthIso(data.availableMonths[data.availableMonths.length - 1]))
+              }
+            />
+            <PresetButton
+              label="This month"
+              active={range.from === monthStartIso() && range.to === todayIso()}
+              onClick={() => applyRange(monthStartIso(), todayIso())}
+            />
+            <PresetButton
+              label="Last 30 days"
+              active={range.from === daysAgoIso(29) && range.to === todayIso()}
+              onClick={() => applyRange(daysAgoIso(29), todayIso())}
+            />
+            <Button asChild variant="outline" size="sm" className="gap-2">
+              <a href={`/api/export/excel?vehicleNo=${encodeURIComponent(vehicleNo)}`} download>
+                <FileSpreadsheet className="h-4 w-4" /> Export Vehicle to Excel
+              </a>
+            </Button>
+          </div>
         </div>
       </div>
+
+      {rangeError && (
+        <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+          {rangeError}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -409,7 +474,26 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
               {data.recent.map((v) => (
                 <li key={v.id} className="flex items-center justify-between gap-4 px-4 py-3">
                   <div>
-                    <p className="text-sm font-medium tabular-nums">{v.voucherNo}</p>
+                    <p className="inline-flex items-center gap-2 text-sm font-medium tabular-nums">
+                      {v.voucherNo}
+                      {v.imageUrl && (
+                        <a
+                          href={v.imageUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="View voucher image"
+                          className="block h-8 w-11 shrink-0 overflow-hidden rounded border bg-muted transition-shadow hover:ring-2 hover:ring-primary/50"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={v.imageUrl}
+                            alt={`Voucher ${v.voucherNo}`}
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        </a>
+                      )}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {new Date(v.date).toLocaleDateString("en-US", {
                         day: "2-digit",

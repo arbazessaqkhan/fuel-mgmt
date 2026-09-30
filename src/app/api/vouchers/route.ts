@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { voucherNo, vehicleNo, liters, date } = parsed.data;
+  const { voucherNo, vehicleNo, liters, date, imageUrl } = parsed.data;
 
   try {
     const voucher = await prisma.fuelVoucher.create({
@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
         vehicleNo,
         liters,
         date: new Date(`${date}T00:00:00.000Z`),
+        imageUrl: imageUrl ?? null,
       },
     });
     return NextResponse.json(voucher, { status: 201 });

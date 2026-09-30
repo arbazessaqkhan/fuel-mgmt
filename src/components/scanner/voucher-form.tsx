@@ -45,9 +45,11 @@ function FieldError({ show, text }: { show: boolean; text?: string }) {
 
 export function VoucherForm({
   ocr,
+  imageUrl,
   onSubmit,
 }: {
   ocr: OcrResult | null;
+  imageUrl?: string | null;
   onSubmit: () => void; // called after a successful save; parent resets
 }) {
   const [values, setValues] = useState<VoucherFormValues>(EMPTY);
@@ -94,6 +96,26 @@ export function VoucherForm({
     setSaving(true);
     setFormError(null);
     try {
+      // Attach the uploaded image (best effort — a failed upload must not
+      // block saving the voucher itself).
+      let attachedImage: string | null = null;
+      if (imageUrl) {
+        try {
+          const blob = await fetch(imageUrl).then((r) => r.blob());
+          const fd = new FormData();
+          fd.append("file", blob, "voucher.jpg");
+          const up = await fetch("/api/uploads", { method: "POST", body: fd });
+          if (up.ok) {
+            const ud = await up.json();
+            attachedImage = ud.url ?? null;
+          } else {
+            toast.warning("Image could not be stored — saving voucher without it.");
+          }
+        } catch {
+          toast.warning("Image could not be stored — saving voucher without it.");
+        }
+      }
+
       const res = await fetch("/api/vouchers", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -102,6 +124,7 @@ export function VoucherForm({
           vehicleNo: values.vehicleNo.trim(),
           liters: parseFloat(values.liters),
           date: values.date,
+          imageUrl: attachedImage,
         }),
       });
       const data = await res.json().catch(() => ({}));

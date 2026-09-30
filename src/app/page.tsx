@@ -1,9 +1,11 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { MetricCards, type Stats } from "@/components/dashboard/metric-cards";
 import { VoucherTable } from "@/components/dashboard/voucher-table";
 import { VehicleChart } from "@/components/dashboard/vehicle-chart";
+import { FileSpreadsheet } from "lucide-react";
 import type { FuelVoucher as Voucher } from "@prisma/client";
 import { useCallback, useEffect, useState } from "react";
 
@@ -96,6 +98,11 @@ export default function DashboardPage() {
             Monthly fuel consumption across your fleet.
           </p>
         </div>
+        <Button asChild variant="outline" className="gap-2">
+          <a href="/api/export/excel" download>
+            <FileSpreadsheet className="h-4 w-4" /> Export All to Excel
+          </a>
+        </Button>
       </div>
 
       {error && (

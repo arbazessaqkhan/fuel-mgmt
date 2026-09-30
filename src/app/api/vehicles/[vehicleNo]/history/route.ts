@@ -35,27 +35,45 @@ export async function GET(
     }
 
     const url = new URL(request.url);
-    const fromParam = url.searchParams.get("from"); // YYYY-MM
-    const toParam = url.searchParams.get("to"); // YYYY-MM
+    // Accept full dates (YYYY-MM-DD, day precision, inclusive `to`) or
+    // month keys (YYYY-MM) for backwards compatibility.
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
     const monthsParam = url.searchParams.get("months");
 
     // Range resolution: explicit from/to (inclusive) wins; otherwise a
     // trailing N-month window ending this month; default 12, clamped 1-24.
     let rangeFrom: Date | null = null;
-    let rangeTo: Date | null = null;
+    let rangeTo: Date | null = null; // exclusive upper bound
+    const dayRe = /^\d{4}-\d{2}-\d{2}$/;
     const monthRe = /^\d{4}-\d{2}$/;
-    if (fromParam && toParam && monthRe.test(fromParam) && monthRe.test(toParam)) {
-      const [fy, fm] = fromParam.split("-").map(Number);
-      const [ty, tm] = toParam.split("-").map(Number);
-      if (fm >= 1 && fm <= 12 && tm >= 1 && tm <= 12) {
-        rangeFrom = new Date(Date.UTC(fy, fm - 1, 1));
-        rangeTo = new Date(Date.UTC(ty, tm - 1, 1));
-        if (rangeTo < rangeFrom) {
-          return NextResponse.json(
-            { error: "End month must be after start month." },
-            { status: 400 }
-          );
-        }
+    const parseBound = (s: string, endOfDay: boolean): Date | null => {
+      if (dayRe.test(s)) {
+        const d = new Date(`${s}T00:00:00.000Z`);
+        if (Number.isNaN(d.getTime())) return null;
+        return endOfDay ? new Date(d.getTime() + 24 * 60 * 60 * 1000) : d;
+      }
+      if (monthRe.test(s)) {
+        const [y, m] = s.split("-").map(Number);
+        if (m < 1 || m > 12) return null;
+        return endOfDay ? new Date(Date.UTC(y, m, 1)) : new Date(Date.UTC(y, m - 1, 1));
+      }
+      return null;
+    };
+    if (fromParam && toParam) {
+      rangeFrom = parseBound(fromParam, false);
+      rangeTo = parseBound(toParam, true);
+      if (!rangeFrom || !rangeTo) {
+        return NextResponse.json(
+          { error: "Dates must be in YYYY-MM-DD or YYYY-MM format." },
+          { status: 400 }
+        );
+      }
+      if (rangeTo <= rangeFrom) {
+        return NextResponse.json(
+          { error: "End date must be after start date." },
+          { status: 400 }
+        );
       }
     }
     let months = Number.parseInt(monthsParam ?? "12", 10);
@@ -80,10 +98,10 @@ export async function GET(
     if (!rangeFrom || !rangeTo) {
       const defaultFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1));
       rangeFrom = defaultFrom;
-      rangeTo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      rangeTo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     }
     const fromMonth = monthKey(rangeFrom);
-    const toMonthKey = monthKey(rangeTo);
+    const toMonthKey = monthKey(new Date(rangeTo.getTime() - 24 * 60 * 60 * 1000));
 
     if (availableMonths.length === 0) {
       return NextResponse.json({ error: "Vehicle not found." }, { status: 404 });
@@ -92,7 +110,7 @@ export async function GET(
     const vouchers = await prisma.fuelVoucher.findMany({
       where: {
         vehicleNo: { equals: plate },
-        date: { gte: rangeFrom, lt: new Date(Date.UTC(rangeTo.getUTCFullYear(), rangeTo.getUTCMonth() + 1, 1)) },
+        date: { gte: rangeFrom, lt: rangeTo },
       },
       orderBy: { date: "asc" },
     });

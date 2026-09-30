@@ -88,7 +88,7 @@ export function VehicleChart({ stats, loading }: { stats: Stats | null; loading:
   const isDimmed = (vehicle: string) => hovered !== null && hovered !== vehicle;
 
   return (
-    <Card className="card-premium h-full border-border/60">
+    <Card className="card-premium border-border/60">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <BarChart3 className="h-4 w-4 text-primary" /> Fuel consumption by vehicle
@@ -98,17 +98,19 @@ export function VehicleChart({ stats, loading }: { stats: Stats | null; loading:
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {/* Fixed chart area: card height stays constant as vehicles are added. */}
+        <div className="h-80 w-full">
         {loading ? (
-          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-full w-full" />
         ) : rows.length === 0 ? (
-          <div className="flex h-72 flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-sm text-muted-foreground">
+          <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-sm text-muted-foreground">
             <BarChart3 className="h-6 w-6 opacity-50" />
             No vehicle data for this month.
           </div>
         ) : (
           <>
-            <div className="w-full overflow-x-auto">
-              <div className="h-72 min-w-[420px]">
+            <div className="h-full w-full overflow-x-auto">
+              <div className="h-full min-w-[420px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={visible}
@@ -147,7 +149,7 @@ export function VehicleChart({ stats, loading }: { stats: Stats | null; loading:
                     fill="url(#barGrad)"
                     radius={[6, 6, 2, 2]}
                     maxBarSize={56}
-                    animationDuration={700}
+                    isAnimationActive={false}
                     onMouseEnter={(_, i) => setHovered(visible[i]?.vehicle ?? null)}
                     onClick={(entry: unknown) => {
                       const row = entry as ChartRow;
@@ -157,7 +159,7 @@ export function VehicleChart({ stats, loading }: { stats: Stats | null; loading:
                     {visible.map((row) => (
                       <Cell
                         key={row.vehicle}
-                        className="cursor-pointer transition-opacity"
+                        className="cursor-pointer"
                         opacity={isDimmed(row.vehicle) ? 0.35 : 1}
                       />
                     ))}
@@ -179,6 +181,7 @@ export function VehicleChart({ stats, loading }: { stats: Stats | null; loading:
             )}
           </>
         )}
+        </div>
       </CardContent>
     </Card>
   );

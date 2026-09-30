@@ -197,7 +197,29 @@ export function VoucherTable(props: VoucherTableProps) {
                   onClick={() => router.push(`/vehicles/${encodeURIComponent(v.vehicleNo)}`)}
                 >
                   <TableCell className="whitespace-nowrap">{fmtDate(v.date)}</TableCell>
-                  <TableCell className="font-medium">{v.voucherNo}</TableCell>
+                  <TableCell className="font-medium">
+                    <span className="inline-flex items-center gap-2">
+                      {v.voucherNo}
+                      {v.imageUrl && (
+                        <a
+                          href={v.imageUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="View voucher image"
+                          onClick={(e) => e.stopPropagation()}
+                          className="block h-9 w-12 shrink-0 overflow-hidden rounded border bg-muted transition-shadow hover:ring-2 hover:ring-primary/50"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={v.imageUrl}
+                            alt={`Voucher ${v.voucherNo}`}
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        </a>
+                      )}
+                    </span>
+                  </TableCell>
                   <TableCell className="font-medium">{v.vehicleNo}</TableCell>
                   <TableCell className="tabular-nums">{v.liters.toFixed(2)}</TableCell>
                   <TableCell className="text-right">
