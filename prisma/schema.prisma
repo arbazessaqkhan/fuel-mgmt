@@ -1,0 +1,24 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model FuelVoucher {
+  id        String   @id @default(uuid())
+  voucherNo String   @unique @map("voucher_no")
+  vehicleNo String   @map("vehicle_no")
+
+  /// Indexed for fast per-vehicle querying
+  @@index([vehicleNo])
+
+  liters    Float
+  date      DateTime
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("fuel_vouchers")
+}
