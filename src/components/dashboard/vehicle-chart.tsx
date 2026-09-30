@@ -98,8 +98,11 @@ export function VehicleChart({ stats, loading }: { stats: Stats | null; loading:
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {/* Fixed chart area: card height stays constant as vehicles are added. */}
-        <div className="h-80 w-full">
+            {/* Fixed chart area: card height stays constant as vehicles are added.
+                overflow-y-scroll (always reserved) prevents the classic resize
+                feedback loop: scrollbar appears → width shrinks → re-layout →
+                scrollbar disappears → repeat, which reads as "vibration". */}
+            <div className="h-80 w-full overflow-y-scroll">
         {loading ? (
           <Skeleton className="h-full w-full" />
         ) : rows.length === 0 ? (
@@ -109,9 +112,8 @@ export function VehicleChart({ stats, loading }: { stats: Stats | null; loading:
           </div>
         ) : (
           <>
-            <div className="h-full w-full overflow-x-auto">
-              <div className="h-full min-w-[420px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-full w-full">
+              <ResponsiveContainer width="99%" height="100%">
                 <BarChart
                   data={visible}
                   margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
@@ -166,7 +168,6 @@ export function VehicleChart({ stats, loading }: { stats: Stats | null; loading:
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            </div>
             </div>
             {rows.length > TOP_N && (
               <button

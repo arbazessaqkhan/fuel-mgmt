@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Fuel, LogOut, Loader2, UserRound, DatabaseBackup } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -26,8 +27,39 @@ export function SiteHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+  // Robust backup download: fetch with credentials → blob → programmatic
+  // anchor download. A plain <a download> to an API route can be swallowed by
+  // the browser in some contexts; this always triggers a real file save.
+  async function handleBackup() {
+    setBackingUp(true);
+    try {
+      const res = await fetch("/api/backup");
+      if (!res.ok) throw new Error(`Backup failed (${res.status})`);
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      const filename = match?.[1] ?? `fuellog-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Database backup downloaded", { description: filename });
+    } catch (err) {
+      toast.error("Backup failed", {
+        description: err instanceof Error ? err.message : "Could not download the backup.",
+      });
+    } finally {
+      setBackingUp(false);
+    }
+  }
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -78,10 +110,13 @@ export function SiteHeader() {
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Account</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <a href="/api/backup" download className="cursor-pointer">
-                  <DatabaseBackup className="mr-2 h-4 w-4" /> Download Database Backup
-                </a>
+              <DropdownMenuItem
+                onClick={handleBackup}
+                disabled={backingUp}
+                className="cursor-pointer"
+              >
+                {backingUp ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DatabaseBackup className="mr-2 h-4 w-4" />}
+                Download Database Backup
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={handleLogout}
