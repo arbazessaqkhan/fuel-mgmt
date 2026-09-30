@@ -18,6 +18,10 @@ export interface VoucherFormValues {
 
 const EMPTY: VoucherFormValues = { voucherNo: "", vehicleNo: "", liters: "", date: "" };
 
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function fieldError(v: VoucherFormValues): Partial<Record<keyof VoucherFormValues, string>> {
   const errs: Partial<Record<keyof VoucherFormValues, string>> = {};
   if (!v.voucherNo.trim()) errs.voucherNo = "Voucher number is required";
@@ -132,8 +136,11 @@ export function VoucherForm({
         toast.success("Voucher saved", {
           description: `${values.voucherNo} · ${values.vehicleNo} · ${values.liters} L`,
         });
-        setValues(EMPTY);
+        // Clear all inputs so the next voucher can be entered immediately.
+        setValues({ ...EMPTY, date: todayIso() });
         setPrefilledFor(null);
+        setErrors({});
+        setFormError(null);
         onSubmit();
         return;
       }
