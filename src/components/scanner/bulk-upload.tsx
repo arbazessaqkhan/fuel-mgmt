@@ -68,6 +68,7 @@ export function BulkUpload() {
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [pageBlobs, setPageBlobs] = useState<Map<string, Blob>>(new Map());
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const setField = (rowId: string, key: keyof Omit<BulkEntry, "rowId" | "status">, value: string) =>
@@ -96,7 +97,9 @@ export function BulkUpload() {
       date: string | null;
     }> = data.vouchers ?? [];
     const warnings: string[] = data.warnings ?? [];
-    return { entries: raws.map(entryFromRaw), warnings };
+    // Keep the page blob so it can be attached to every voucher saved from
+    // this page (same behavior as single-entry image retention).
+    return { entries: raws.map(entryFromRaw), warnings, pageBlob: blob };
   }, []);
 
   const handleFile = useCallback(
@@ -116,6 +119,7 @@ export function BulkUpload() {
           const pdf = await pdfjs.getDocument({ data: buf }).promise;
           const collected: BulkEntry[] = [];
           const warnings: string[] = [];
+          const pageBlobs = new Map<string, Blob>(); // rowId → page image
           for (let i = 1; i <= pdf.numPages; i++) {
             setProgressLabel(`Page ${i} of ${pdf.numPages}…`);
             const page = await pdf.getPage(i);
@@ -126,10 +130,11 @@ export function BulkUpload() {
             const ctx = canvas.getContext("2d");
             if (!ctx) throw new Error("Canvas not supported in this browser.");
             await page.render({ canvasContext: ctx, viewport }).promise;
-            const { entries: pageEntries, warnings: pageWarnings } = await extractPage(
+            const { entries: pageEntries, warnings: pageWarnings, pageBlob } = await extractPage(
               canvas,
               `page ${i}`
             );
+            for (const e of pageEntries) pageBlobs.set(e.rowId, pageBlob);
             collected.push(...pageEntries);
             warnings.push(...pageWarnings.map((w) => `Page ${i}: ${w}`));
           }
@@ -144,13 +149,17 @@ export function BulkUpload() {
                 : "Review the entries below, then save the batch.",
             });
           }
+          setPageBlobs(pageBlobs);
           setEntries(collected);
         } else if (file.type.startsWith("image/")) {
           setProgressLabel("Extracting entries from image…");
-          const { entries: imgEntries, warnings } = await extractPage(
+          const { entries: imgEntries, warnings, pageBlob } = await extractPage(
             await fileToCanvas(file),
             file.name
           );
+          const imgMap = new Map<string, Blob>();
+          for (const e of imgEntries) imgMap.set(e.rowId, pageBlob);
+          setPageBlobs(imgMap);
           setEntries(imgEntries);
           if (imgEntries.length === 0) {
             toast.warning("No vouchers found", { description: warnings[0] ?? "Nothing detected." });
@@ -176,6 +185,33 @@ export function BulkUpload() {
   async function saveAll() {
     setSaving(true);
     const results = { saved: 0, duplicate: 0, failed: 0 };
+    // Upload each distinct page image ONCE (best-effort, like single-entry:
+    // failure must not block saving) and reuse the URL for all entries that
+    // came from that page.
+    const imageUrlByRow = new Map<string, string>();
+    const blobBySource = new Map<Blob, string>();
+    for (const entry of entries) {
+      const blob = pageBlobs.get(entry.rowId);
+      if (!blob) continue;
+      try {
+        let url = blobBySource.get(blob);
+        if (!url) {
+          const fd = new FormData();
+          fd.append("file", blob, "voucher-page.jpg");
+          const up = await fetch("/api/uploads", { method: "POST", body: fd });
+          if (up.ok) {
+            const ud = await up.json();
+            url = ud.url ?? null;
+            if (url) blobBySource.set(blob, url);
+          } else {
+            toast.warning("Images could not be stored — saving vouchers without them.");
+          }
+        }
+        if (url) imageUrlByRow.set(entry.rowId, url);
+      } catch {
+        toast.warning("Images could not be stored — saving vouchers without them.");
+      }
+    }
     // Sequential saves so per-row status reflects reality and duplicates are
     // flagged against both the DB and rows saved earlier in this batch.
     for (const entry of entries) {
@@ -200,6 +236,7 @@ export function BulkUpload() {
             vehicleNo: entry.vehicleNo.trim(),
             liters: parseFloat(entry.liters),
             date: entry.date,
+            imageUrl: imageUrlByRow.get(entry.rowId) ?? null,
           }),
         });
         const data = await res.json().catch(() => ({}));
