@@ -12,6 +12,7 @@ export interface Stats {
   voucherCount: number;
   mostActiveVehicle: string | null;
   vehicleBreakdown: Array<{ vehicleNo: string; liters: number; vouchers: number }>;
+  fallback?: boolean;
 }
 
 const MONTHS = [
@@ -30,8 +31,7 @@ const cardStyles = [
 ];
 
 export function MetricCards({ stats, loading }: { stats: Stats | null; loading: boolean }) {
-  const monthLabel = stats ? `${MONTHS[stats.month - 1]} ${stats.year}` : undefined;
-  const cards = [
+  const monthLabel = stats ? `${MONTHS[stats.month - 1]} ${stats.year}` : undefined;  const cards = [
     {
       title: "Total Liters",
       icon: Droplets,
