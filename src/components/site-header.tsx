@@ -84,6 +84,13 @@ export function SiteHeader() {
               Fleet Manager
             </span>
           </span>
+          {/* Company logo — navy wordmark is hard to read on the dark header,
+              so it sits on a soft white chip in dark mode. */}
+          <img
+            src="/jkspdc.png"
+            alt="JKPDC — A Govt. of J&K PSU"
+            className="ml-1 hidden h-9 w-auto sm:block dark:rounded-md dark:bg-white/90 dark:p-1"
+          />
         </Link>
         <nav className="flex min-w-0 items-center gap-1 overflow-x-auto text-sm">
           {links.map(({ href, label }) => (

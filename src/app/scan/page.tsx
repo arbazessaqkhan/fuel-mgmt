@@ -164,7 +164,7 @@ export default function ScanPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <VoucherForm ocr={ocr} imageUrl={previewUrl} onSubmit={() => {/* keep image so user can rescan similar */}} />
+            <VoucherForm ocr={ocr} imageUrl={previewUrl} onSubmit={handleClear} />
             {ocr && (
               <>
                 <Separator className="my-4" />

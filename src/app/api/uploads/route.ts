@@ -32,7 +32,9 @@ export async function POST(req: NextRequest) {
     const dir = path.join(process.cwd(), "public", "uploads");
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, name), bytes);
-    return NextResponse.json({ url: `/uploads/${name}` }, { status: 201 });
+    // Served via the /uploads/[...path] route handler — `next start` snapshots
+    // public/ at boot, so static serving 404s files uploaded after start.
+    return NextResponse.json({ url: `/uploads/f/${name}` }, { status: 201 });
   } catch (err) {
     console.error("Upload failed:", err);
     return NextResponse.json({ error: "Failed to store file." }, { status: 500 });

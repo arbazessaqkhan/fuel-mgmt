@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,7 +9,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Fuel, Loader2, ShieldAlert } from "lucide-react";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +29,6 @@ export default function LoginPage() {
         setError(data.error ?? "Login failed. Please try again.");
         return;
       }
-      router.push("/");
       // A hard navigation guarantees the fresh session cookie is sent with
       // the first authenticated page request (soft RSC navigations from the
       // login page can race the Set-Cookie).
@@ -47,8 +44,13 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-muted/40 p-4">
       <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
-            <Fuel className="h-7 w-7" />
+          <img
+            src="/jkspdc.png"
+            alt="JKPDC — A Govt. of J&K PSU"
+            className="h-20 w-auto"
+          />
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
+            <Fuel className="h-6 w-6" />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">FuelLog Fleet Manager</h1>
           <p className="text-sm text-muted-foreground">

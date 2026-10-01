@@ -12,10 +12,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { FuelVoucher as Voucher } from "@prisma/client";
-import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, Pencil, Search, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, Pencil, Search, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -60,9 +61,64 @@ export function VoucherTable(props: VoucherTableProps) {
   const [editValues, setEditValues] = useState({ voucherNo: "", vehicleNo: "", liters: "", date: "" });
   const [editError, setEditError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const allOnPageSelected = vouchers.length > 0 && vouchers.every((v) => selected.has(v.id));
+  const someOnPageSelected = vouchers.some((v) => selected.has(v.id));
+
+  function toggleRow(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected((prev) => {
+      if (vouchers.length > 0 && vouchers.every((v) => prev.has(v.id))) {
+        const next = new Set(prev);
+        vouchers.forEach((v) => next.delete(v.id));
+        return next;
+      }
+      const next = new Set(prev);
+      vouchers.forEach((v) => next.add(v.id));
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+    setBulkConfirm(false);
+  }
+
+  async function handleBulkDelete() {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    try {
+      const res = await fetch(`/api/vouchers/${selected.values().next().value}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: [...selected] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error();
+      toast.success(`${data.deleted ?? selected.size} voucher${selected.size === 1 ? "" : "s"} deleted`);
+      clearSelection();
+      onChanged();
+    } catch {
+      toast.error("Could not delete the selected vouchers");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const columns: Array<{ key: SortField | "actions"; label: string; sortable?: boolean }> = [
+  const columns: Array<{ key: SortField | "actions" | "select"; label: string; sortable?: boolean }> = [
+    { key: "select", label: "" },
     { key: "date", label: "Date", sortable: true },
     { key: "voucherNo", label: "Voucher No.", sortable: true },
     { key: "vehicleNo", label: "Vehicle No.", sortable: true },
@@ -136,6 +192,27 @@ export function VoucherTable(props: VoucherTableProps) {
 
   return (
     <div className="space-y-3">
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <span className="text-sm font-medium">
+            {selected.size} voucher{selected.size === 1 ? "" : "s"} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={clearSelection} disabled={bulkBusy}>
+              <X className="mr-1 h-4 w-4" /> Clear
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setBulkConfirm(true)}
+              disabled={bulkBusy}
+            >
+              <Trash2 className="mr-1.5 h-4 w-4" /> Delete selected
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="relative max-w-sm">
         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
@@ -154,8 +231,15 @@ export function VoucherTable(props: VoucherTableProps) {
           <TableHeader>
             <TableRow>
               {columns.map((c) => (
-                <TableHead key={c.key}>
-                  {c.sortable ? (
+                <TableHead key={c.key} className={c.key === "select" ? "w-10 pr-0" : undefined}>
+                  {c.key === "select" ? (
+                    <Checkbox
+                      aria-label="Select all vouchers on this page"
+                      checked={allOnPageSelected ? true : someOnPageSelected ? "indeterminate" : false}
+                      onCheckedChange={toggleAll}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : c.sortable ? (
                     <button
                       className="flex items-center font-medium hover:text-foreground"
                       onClick={() => onSort(c.key as SortField)}
@@ -196,6 +280,13 @@ export function VoucherTable(props: VoucherTableProps) {
                   className="cursor-pointer transition-colors hover:bg-muted/60"
                   onClick={() => router.push(`/vehicles/${encodeURIComponent(v.vehicleNo)}`)}
                 >
+                  <TableCell className="pr-0" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      aria-label={`Select voucher ${v.voucherNo}`}
+                      checked={selected.has(v.id)}
+                      onCheckedChange={() => toggleRow(v.id)}
+                    />
+                  </TableCell>
                   <TableCell className="whitespace-nowrap">{fmtDate(v.date)}</TableCell>
                   <TableCell className="font-medium">
                     <span className="inline-flex items-center gap-2">
@@ -272,6 +363,29 @@ export function VoucherTable(props: VoucherTableProps) {
           </Button>
         </div>
       </div>
+
+      {/* Bulk delete confirmation */}
+      <Dialog open={bulkConfirm} onOpenChange={(o) => !o && setBulkConfirm(false)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              Delete {selected.size} voucher{selected.size === 1 ? "" : "s"}?
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This permanently removes the {selected.size} selected voucher{selected.size === 1 ? "" : "s"}.
+            This cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkConfirm(false)} disabled={bulkBusy}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={bulkBusy}>
+              {bulkBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirmation */}
       <Dialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>

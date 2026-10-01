@@ -13,8 +13,9 @@ type SortField = "date" | "voucherNo" | "vehicleNo" | "liters";
 
 export default function DashboardPage() {
   const now = new Date();
-  const [year] = useState(now.getUTCFullYear());
-  const [month] = useState(now.getUTCMonth() + 1);
+  // Stats default to the current month; when the current month has no vouchers
+  // yet, the API falls back to the most recent month with data (flagged via
+  // `fallback`), so the cards never show a misleading 0 on the 1st of a month.
   const [stats, setStats] = useState<Stats | null>(null);
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [total, setTotal] = useState(0);
@@ -30,7 +31,7 @@ export default function DashboardPage() {
   const loadStats = useCallback(async () => {
     setLoadingStats(true);
     try {
-      const res = await fetch(`/api/stats?year=${year}&month=${month}`);
+      const res = await fetch(`/api/stats`);
       if (!res.ok) throw new Error();
       setStats(await res.json());
       setError(null);
@@ -39,7 +40,7 @@ export default function DashboardPage() {
     } finally {
       setLoadingStats(false);
     }
-  }, [year, month]);
+  }, []);
 
   const loadVouchers = useCallback(async () => {
     setLoadingTable(true);
@@ -96,6 +97,11 @@ export default function DashboardPage() {
           </h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
             Monthly fuel consumption across your fleet.
+            {stats?.fallback && (
+              <span className="text-amber-600">
+                {" "}Showing the most recent month with data ({new Date(stats.year, stats.month - 1).toLocaleString("en", { month: "long" })} {stats.year}) — no vouchers recorded yet for {new Date().toLocaleString("en", { month: "long" })} {new Date().getFullYear()}.
+              </span>
+            )}
           </p>
         </div>
         <Button asChild variant="outline" className="gap-2">

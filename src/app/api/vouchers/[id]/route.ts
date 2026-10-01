@@ -53,7 +53,28 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_req: NextRequest, ctx: Ctx) {
+export async function DELETE(req: NextRequest, ctx: Ctx) {
+  // Bulk form: same route with JSON body { ids: [...] } deletes many at once.
+  if (req.headers.get("content-type")?.includes("application/json")) {
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Request body must be valid JSON" }, { status: 400 });
+    }
+    const ids = (body as { ids?: unknown })?.ids;
+    if (!Array.isArray(ids) || ids.length === 0 || !ids.every((i) => typeof i === "string" && i.length > 0)) {
+      return NextResponse.json({ error: "Provide a non-empty array of voucher ids." }, { status: 400 });
+    }
+    try {
+      const result = await prisma.fuelVoucher.deleteMany({ where: { id: { in: ids } } });
+      return NextResponse.json({ ok: true, deleted: result.count });
+    } catch (err) {
+      console.error("bulk DELETE /api/vouchers/[id] failed", err);
+      return NextResponse.json({ error: "Failed to delete vouchers" }, { status: 500 });
+    }
+  }
+
   const { id } = await ctx.params;
   try {
     await prisma.fuelVoucher.delete({ where: { id } });
