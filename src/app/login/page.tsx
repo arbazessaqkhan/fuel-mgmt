@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Fuel, Loader2, ShieldAlert } from "lucide-react";
+import { toast } from "sonner";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -31,8 +32,10 @@ export default function LoginPage() {
       }
       // A hard navigation guarantees the fresh session cookie is sent with
       // the first authenticated page request (soft RSC navigations from the
-      // login page can race the Set-Cookie).
-      window.location.href = "/";
+      // login page can race the Set-Cookie). Pause briefly so the welcome
+      // toast is visible before the page swaps.
+      toast.success("Signed in", { description: "Welcome back to FuelLog Fleet Manager." });
+      setTimeout(() => { window.location.href = "/"; }, 700);
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -102,9 +105,6 @@ export default function LoginPage() {
             </form>
           </CardContent>
         </Card>
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          Protected area · Fuel &amp; Power Development Corporation fleet
-        </p>
       </div>
     </div>
   );

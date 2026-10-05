@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -16,6 +16,8 @@ model FuelVoucher {
   @@index([vehicleNo])
 
   liters    Float
+  /// Petrol or Diesel — whichever line is filled on the physical voucher
+  fuelType  String   @default("Diesel") @map("fuel_type")
   date      DateTime
   imageUrl  String?  @map("image_url")
   createdAt DateTime @default(now()) @map("created_at")

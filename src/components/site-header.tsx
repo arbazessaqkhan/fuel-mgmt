@@ -5,9 +5,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Fuel, LogOut, Loader2, UserRound, DatabaseBackup } from "lucide-react";
+import { Fuel, LogOut, Loader2, UserRound, DatabaseBackup, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +36,17 @@ export function SiteHeader() {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
+  async function doLogout() {
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
+  }
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
@@ -62,13 +81,8 @@ export function SiteHeader() {
   }
 
   async function handleLogout() {
-    setLoggingOut(true);
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } finally {
-      router.push("/login");
-      router.refresh();
-    }
+    setConfirmLogout(false);
+    await doLogout();
   }
 
   return (
@@ -126,17 +140,39 @@ export function SiteHeader() {
                 Download Database Backup
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={handleLogout}
-                disabled={loggingOut}
+                onClick={() => setConfirmLogout(true)}
                 className="cursor-pointer text-destructive focus:text-destructive"
               >
-                {loggingOut ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
+                <LogOut className="mr-2 h-4 w-4" />
                 Logout
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </nav>
       </div>
+
+      {/* Sign-out alert */}
+      <Dialog open={confirmLogout} onOpenChange={setConfirmLogout}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" /> Sign out?
+            </DialogTitle>
+            <DialogDescription>
+              You will need to sign in again to access the dashboard, vouchers and
+              analytics.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmLogout(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleLogout} disabled={loggingOut}>
+              {loggingOut && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Sign out
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }

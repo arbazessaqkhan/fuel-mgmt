@@ -4,6 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { OcrResult } from "@/lib/ocr/types";
 import { AlertTriangle, Loader2, PencilLine, Save } from "lucide-react";
 import { useState } from "react";
@@ -13,10 +20,11 @@ export interface VoucherFormValues {
   voucherNo: string;
   vehicleNo: string;
   liters: string;
+  fuelType: string;
   date: string;
 }
 
-const EMPTY: VoucherFormValues = { voucherNo: "", vehicleNo: "", liters: "", date: "" };
+const EMPTY: VoucherFormValues = { voucherNo: "", vehicleNo: "", liters: "", fuelType: "Diesel", date: "" };
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -69,6 +77,7 @@ export function VoucherForm({
       voucherNo: ocr.voucherNo.value ?? "",
       vehicleNo: ocr.vehicleNo.value ?? "",
       liters: ocr.liters.value != null ? String(ocr.liters.value) : "",
+      fuelType: "Diesel",
       date: ocr.date.value ?? "",
     });
     setErrors({});
@@ -127,6 +136,7 @@ export function VoucherForm({
           voucherNo: values.voucherNo.trim(),
           vehicleNo: values.vehicleNo.trim(),
           liters: parseFloat(values.liters),
+          fuelType: values.fuelType === "Petrol" ? "Petrol" : "Diesel",
           date: values.date,
           imageUrl: attachedImage,
         }),
@@ -191,7 +201,7 @@ export function VoucherForm({
           </Alert>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid items-start gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="voucherNo">Voucher No.</Label>
             <Input
@@ -227,6 +237,21 @@ export function VoucherForm({
               aria-invalid={!!errors.liters}
             />
             <FieldError show={!!errors.liters} text={errors.liters} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="fuelType">Fuel type</Label>
+            <Select
+              value={values.fuelType}
+              onValueChange={(v) => setValues((p) => ({ ...p, fuelType: v }))}
+            >
+              <SelectTrigger id="fuelType" aria-label="Fuel type">
+                <SelectValue placeholder="Select fuel type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Petrol">Petrol</SelectItem>
+                <SelectItem value="Diesel">Diesel</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="date">Date</Label>
@@ -328,6 +353,25 @@ export function VoucherForm({
           ) : (
             <LowConfidenceNote show={lowConfidence(ocr.liters.confidence)} />
           )}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="fuelType-ocr">Fuel type</Label>
+          <Select
+            value={values.fuelType}
+            onValueChange={(v) => set("fuelType", v)}
+          >
+            <SelectTrigger id="fuelType-ocr" aria-label="Fuel type">
+              <SelectValue placeholder="Select fuel type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Petrol">Petrol</SelectItem>
+              <SelectItem value="Diesel">Diesel</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Pick whichever line is filled on the voucher — Petrol or Diesel.
+          </p>
         </div>
 
         <div className="space-y-1.5">

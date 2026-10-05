@@ -1,8 +1,8 @@
 // Auth E2E: logged-out redirect, bad credentials, login, persistence, logout, API 401.
 const { chromium } = require("playwright");
 const BASE = "http://localhost:3000";
-const USER = "FuelPdc@7860#";
-const PASS = "7860#pdcAdmin";
+const USER = "EmpPdcFuel";
+const PASS = "EP@2026#";
 
 (async () => {
   const results = [];
@@ -42,10 +42,11 @@ const PASS = "7860#pdcAdmin";
   await page.goto(BASE + "/scan", { waitUntil: "domcontentloaded" });
   check("scan page accessible logged in", !page.url().includes("/login"));
 
-  // 6. logout (via account dropdown menu)
+  // 6. logout (via account dropdown menu -> confirmation alert)
   await page.click("button[aria-label='Account menu']");
   await page.waitForTimeout(400);
   await page.click("text=Logout");
+  await page.click('div[role="dialog"] button:has-text("Sign out")', { timeout: 5000 });
   await page.waitForURL("**/login", { timeout: 10000 });
   check("logout redirects to login", page.url().includes("/login"));
 

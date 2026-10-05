@@ -26,7 +26,7 @@ export default function DashboardPage() {
   const [loadingStats, setLoadingStats] = useState(true);
   const [loadingTable, setLoadingTable] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const pageSize = 25;
+  const pageSize = 10;
 
   const loadStats = useCallback(async () => {
     setLoadingStats(true);
@@ -97,11 +97,6 @@ export default function DashboardPage() {
           </h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
             Monthly fuel consumption across your fleet.
-            {stats?.fallback && (
-              <span className="text-amber-600">
-                {" "}Showing the most recent month with data ({new Date(stats.year, stats.month - 1).toLocaleString("en", { month: "long" })} {stats.year}) — no vouchers recorded yet for {new Date().toLocaleString("en", { month: "long" })} {new Date().getFullYear()}.
-              </span>
-            )}
           </p>
         </div>
         <Button asChild variant="outline" className="gap-2">

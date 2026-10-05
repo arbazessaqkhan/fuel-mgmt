@@ -25,6 +25,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ImageIcon } from "lucide-react";
 
 type SortField = "date" | "voucherNo" | "vehicleNo" | "liters";
 
@@ -58,7 +66,11 @@ export function VoucherTable(props: VoucherTableProps) {
   const [searchInput, setSearchInput] = useState(search);
   const [deleting, setDeleting] = useState<Voucher | null>(null);
   const [edit, setEdit] = useState<Voucher | null>(null);
-  const [editValues, setEditValues] = useState({ voucherNo: "", vehicleNo: "", liters: "", date: "" });
+  const [editValues, setEditValues] = useState({
+    voucherNo: "", vehicleNo: "", liters: "", fuelType: "Diesel", date: "",
+  });
+  const [editImage, setEditImage] = useState<string | null>(null);
+  const [editImageBusy, setEditImageBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -156,8 +168,27 @@ export function VoucherTable(props: VoucherTableProps) {
       voucherNo: v.voucherNo,
       vehicleNo: v.vehicleNo,
       liters: String(v.liters),
+      fuelType: v.fuelType === "Petrol" ? "Petrol" : "Diesel",
       date: new Date(v.date).toISOString().slice(0, 10),
     });
+    setEditImage(v.imageUrl ?? null);
+  }
+
+  async function handleEditImageUpload(file: File) {
+    setEditImageBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file, file.name || "voucher.jpg");
+      const res = await fetch("/api/uploads", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) throw new Error();
+      setEditImage(data.url);
+      toast.success("New image attached — save to keep it");
+    } catch {
+      toast.error("Could not upload the image");
+    } finally {
+      setEditImageBusy(false);
+    }
   }
 
   async function handleEditSave() {
@@ -172,7 +203,9 @@ export function VoucherTable(props: VoucherTableProps) {
           voucherNo: editValues.voucherNo.trim(),
           vehicleNo: editValues.vehicleNo.trim(),
           liters: parseFloat(editValues.liters),
+          fuelType: editValues.fuelType === "Petrol" ? "Petrol" : "Diesel",
           date: editValues.date,
+          imageUrl: editImage,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -417,11 +450,11 @@ export function VoucherTable(props: VoucherTableProps) {
             <DialogTitle>Edit voucher</DialogTitle>
           </DialogHeader>
           {editError && (
-            <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p className="shrink-0 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {editError}
             </p>
           )}
-          <div className="grid gap-3">
+          <div className="grid gap-3 overflow-y-auto -mr-2 pr-2 min-h-0">
             <div className="space-y-1.5">
               <Label htmlFor="edit-voucherNo">Voucher No.</Label>
               <Input
@@ -439,6 +472,21 @@ export function VoucherTable(props: VoucherTableProps) {
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-fuelType">Fuel type</Label>
+                <Select
+                  value={editValues.fuelType}
+                  onValueChange={(v) => setEditValues((p) => ({ ...p, fuelType: v }))}
+                >
+                  <SelectTrigger id="edit-fuelType" aria-label="Fuel type">
+                    <SelectValue placeholder="Select fuel type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Petrol">Petrol</SelectItem>
+                    <SelectItem value="Diesel">Diesel</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="edit-liters">Liters</Label>
                 <Input
@@ -459,6 +507,69 @@ export function VoucherTable(props: VoucherTableProps) {
                   onChange={(e) => setEditValues((v) => ({ ...v, date: e.target.value }))}
                 />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Voucher image</Label>
+              {editImage ? (
+                <a
+                  href={editImage}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-fit overflow-hidden rounded-md border"
+                  title="View full size"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={editImage}
+                    alt="Voucher"
+                    className="max-h-48 max-w-full object-contain"
+                  />
+                </a>
+              ) : (
+                <p className="flex items-center gap-1.5 rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                  <ImageIcon className="h-4 w-4" /> No image uploaded for this voucher.
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <Label
+                  htmlFor="edit-image"
+                  className="inline-flex h-9 cursor-pointer items-center rounded-md border px-3 text-sm font-medium hover:bg-muted"
+                >
+                  {editImageBusy
+                    ? "Uploading…"
+                    : editImage
+                      ? "Replace image"
+                      : "Upload image"}
+                </Label>
+                <Input
+                  id="edit-image"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  disabled={editImageBusy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleEditImageUpload(f);
+                    e.target.value = "";
+                  }}
+                />
+                {editImage && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={editImageBusy}
+                    onClick={() => setEditImage(null)}
+                  >
+                    Remove image
+                  </Button>
+                )}
+              </div>
+              {editImage !== (edit?.imageUrl ?? null) && (
+                <p className="text-xs text-amber-600">
+                  Image changed — click “Save changes” to keep it.
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>

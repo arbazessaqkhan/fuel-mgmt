@@ -15,6 +15,9 @@ export const voucherCreateSchema = z.object({
     .number({ message: "Liters must be a number" })
     .positive("Liters must be greater than zero")
     .max(100000, "Liters is unrealistically large"),
+  fuelType: z
+    .enum(["Petrol", "Diesel"], { message: "Fuel type must be Petrol or Diesel" })
+    .default("Diesel"),
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format")

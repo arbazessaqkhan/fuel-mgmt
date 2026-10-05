@@ -4,18 +4,20 @@ export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 export type SessionPayload = { sub: string; exp: number };
 
-function getSecret(): string {
+function getSecret(): string | null {
   const secret = process.env.AUTH_SECRET;
-  if (!secret || secret.length < 8) return "fuellog-fallback-secret-do-not-use";
+  if (!secret || secret.length < 8) return null;
   return secret;
 }
 
 const te = new TextEncoder();
 
 async function sign(data: string): Promise<string> {
+  const secret = getSecret();
+  if (!secret) throw new Error("AUTH_SECRET is not configured.");
   const key = await crypto.subtle.importKey(
     "raw",
-    te.encode(getSecret()),
+    te.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -42,12 +44,13 @@ function b64urlDecode(s: string): string {
 }
 
 export async function createSessionToken(username: string): Promise<string> {
+  if (!getSecret()) throw new Error("AUTH_SECRET is not configured.");
   const body = b64urlEncode(JSON.stringify({ sub: username, exp: Date.now() + SESSION_TTL_MS }));
   return `${body}.${await sign(body)}`;
 }
 
 export async function verifySessionToken(token: string | undefined | null): Promise<SessionPayload | null> {
-  if (!token) return null;
+  if (!token || !getSecret()) return null;
   const parts = token.split(".");
   if (parts.length !== 2) return null;
   const [body, sig] = parts;

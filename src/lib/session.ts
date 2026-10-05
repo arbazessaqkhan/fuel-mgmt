@@ -4,8 +4,11 @@ export { createSessionToken, SESSION_COOKIE, SESSION_TTL_MS };
 export type { SessionPayload };
 
 export function verifyCredentials(username: string, password: string): boolean {
-  const u = process.env.AUTH_USERNAME ?? "FuelPdc@7860#";
-  const p = process.env.AUTH_PASSWORD ?? "7860#pdcAdmin";
+  // Credentials come from the environment only — no hardcoded fallbacks.
+  // Login is impossible until AUTH_USERNAME, AUTH_PASSWORD and AUTH_SECRET are set.
+  const u = process.env.AUTH_USERNAME;
+  const p = process.env.AUTH_PASSWORD;
+  if (!u || !p || !username || !password) return false;
   return username === u && password === p;
 }
 

@@ -36,7 +36,7 @@ export default function RootLayout({
           <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
             {children}
           </main>
-          <Toaster richColors position="top-right" />
+          <Toaster richColors position="bottom-right" />
         </ThemeProvider>
       </body>
     </html>
