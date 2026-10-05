@@ -1,7 +1,10 @@
 .env*
+!.env.example
 node_modules
 .next
 out
 dist
 .DS_Store
 *.log
+.neon
+*.tsbuildinfo

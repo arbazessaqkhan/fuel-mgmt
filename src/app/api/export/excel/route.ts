@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import path from "path";
 import { readFile } from "fs/promises";
 import ExcelJS from "exceljs";
+import { Buffer } from "node:buffer";
+import { getVoucherImage, isValidImageKey } from "@/lib/storage";
 
 /**
  * GET /api/export/excel
@@ -49,7 +51,79 @@ export async function GET(req: NextRequest) {
       fgColor: { argb: "FFE8EFFC" },
     };
 
-    let embedded = 0;
+    // Pre-fetch images concurrently in batches of 10 for ultra-fast throughput
+    const uniqueUrls = Array.from(
+      new Set(vouchers.map((v) => v.imageUrl).filter((url): url is string => Boolean(url)))
+    ).slice(0, MAX_EMBED_IMAGES);
+
+    const imageMap = new Map<string, { buf: Buffer; ext: "png" | "jpeg" }>();
+    const BATCH_SIZE = 10;
+
+    for (let i = 0; i < uniqueUrls.length; i += BATCH_SIZE) {
+      const batch = uniqueUrls.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (imageUrl) => {
+          try {
+            let buf: Buffer | null = null;
+            let cleanUrl = imageUrl;
+            if (cleanUrl.startsWith("http://") || cleanUrl.startsWith("https://")) {
+              try {
+                cleanUrl = new URL(cleanUrl).pathname;
+              } catch {
+                // keep cleanUrl as is
+              }
+            }
+            let ext = path.extname(cleanUrl).toLowerCase();
+
+            if (cleanUrl.startsWith("/api/images/vouchers/")) {
+              const key = cleanUrl.replace(/^\/api\/images\//, "");
+              if (isValidImageKey(key)) {
+                buf = await getVoucherImage(key);
+              }
+            } else if (cleanUrl.startsWith("/uploads/")) {
+              const safe = path.basename(cleanUrl);
+              const filePath = path.join(process.cwd(), "public", "uploads", safe);
+              ext = path.extname(safe).toLowerCase();
+              buf = await readFile(filePath).catch(() => null);
+            }
+
+            if (!buf && (imageUrl.startsWith("http://") || imageUrl.startsWith("https://"))) {
+              try {
+                const res = await fetch(imageUrl);
+                if (res.ok) {
+                  buf = Buffer.from(await res.arrayBuffer());
+                  ext = path.extname(cleanUrl).toLowerCase();
+                }
+              } catch {
+                // ignore
+              }
+            }
+
+            if (buf) {
+              if (ext === ".webp") {
+                try {
+                  const { default: sharp } = await import("sharp");
+                  buf = await sharp(buf).jpeg().toBuffer();
+                  ext = ".jpeg";
+                } catch {
+                  // sharp optional fallback
+                }
+              }
+
+              if (ext === ".png" || ext === ".jpg" || ext === ".jpeg") {
+                imageMap.set(imageUrl, {
+                  buf,
+                  ext: ext === ".png" ? "png" : "jpeg",
+                });
+              }
+            }
+          } catch (err) {
+            console.error(`excel export: could not fetch ${imageUrl}`, err);
+          }
+        })
+      );
+    }
+
     for (const v of vouchers) {
       const row = sheet.addRow({
         voucherNo: v.voucherNo,
@@ -59,31 +133,18 @@ export async function GET(req: NextRequest) {
       });
       row.height = 64;
 
-      if (v.imageUrl && embedded < MAX_EMBED_IMAGES) {
-        try {
-          // imageUrl is validated at creation time as /uploads/<safe-name>,
-          // so resolving inside public/ is safe.
-          const safe = path.basename(v.imageUrl);
-          const filePath = path.join(process.cwd(), "public", "uploads", safe);
-          const ext = path.extname(safe).toLowerCase();
-          if (ext === ".png" || ext === ".jpg" || ext === ".jpeg") {
-            const buf = await readFile(filePath);
-            const imageId = book.addImage({
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              buffer: buf as any,
-              extension: ext === ".png" ? "png" : "jpeg",
-            });
-            const imgRow = row.number;
-            sheet.addImage(imageId, {
-              tl: { col: 4.05, row: imgRow - 0.9 },
-              ext: { width: 84, height: 60 },
-            });
-            embedded++;
-          }
-        } catch (err) {
-          // Missing file on disk: leave the cell empty rather than failing the export.
-          console.error(`excel export: could not embed ${v.imageUrl}`, err);
-        }
+      if (v.imageUrl && imageMap.has(v.imageUrl)) {
+        const item = imageMap.get(v.imageUrl)!;
+        const imageId = book.addImage({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          buffer: item.buf as any,
+          extension: item.ext,
+        });
+        const imgRow = row.number;
+        sheet.addImage(imageId, {
+          tl: { col: 4.05, row: imgRow - 0.9 },
+          ext: { width: 84, height: 60 },
+        });
       }
     }
 

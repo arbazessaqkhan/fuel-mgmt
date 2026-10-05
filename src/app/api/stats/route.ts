@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { prisma, withDbRetry } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -25,32 +25,54 @@ export async function GET(req: NextRequest) {
     let end = new Date(Date.UTC(year, month, 1, 0, 0, 0));
     let fallback = false;
 
-    if (!explicit) {
-      const currentCount = await prisma.fuelVoucher.count({ where: { date: { gte: start, lt: end } } });
-      if (currentCount === 0) {
-        const latest = await prisma.fuelVoucher.findFirst({ orderBy: { date: "desc" }, select: { date: true } });
-        if (latest?.date) {
-          const y = latest.date.getUTCFullYear();
-          const m = latest.date.getUTCMonth() + 1;
-          start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
-          end = new Date(Date.UTC(y, m, 1, 0, 0, 0));
-          fallback = true;
-        }
+    let where = { date: { gte: start, lt: end } };
+
+    let [totalAgg, perVehicle] = await withDbRetry(() =>
+      Promise.all([
+        prisma.fuelVoucher.aggregate({
+          _sum: { liters: true },
+          _count: { _all: true },
+          where,
+        }),
+        prisma.fuelVoucher.groupBy({
+          by: ["vehicleNo"],
+          where,
+          _sum: { liters: true },
+          _count: { _all: true },
+          orderBy: { _sum: { liters: "desc" } },
+        }),
+      ])
+    );
+
+    if (!explicit && (totalAgg._count._all ?? 0) === 0) {
+      const latest = await withDbRetry(() =>
+        prisma.fuelVoucher.findFirst({ orderBy: { date: "desc" }, select: { date: true } })
+      );
+      if (latest?.date) {
+        const y = latest.date.getUTCFullYear();
+        const m = latest.date.getUTCMonth() + 1;
+        start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+        end = new Date(Date.UTC(y, m, 1, 0, 0, 0));
+        fallback = true;
+        where = { date: { gte: start, lt: end } };
+        [totalAgg, perVehicle] = await withDbRetry(() =>
+          Promise.all([
+            prisma.fuelVoucher.aggregate({
+              _sum: { liters: true },
+              _count: { _all: true },
+              where,
+            }),
+            prisma.fuelVoucher.groupBy({
+              by: ["vehicleNo"],
+              where,
+              _sum: { liters: true },
+              _count: { _all: true },
+              orderBy: { _sum: { liters: "desc" } },
+            }),
+          ])
+        );
       }
     }
-    const where = { date: { gte: start, lt: end } };
-
-    const [totalAgg, count, perVehicle] = await Promise.all([
-      prisma.fuelVoucher.aggregate({ _sum: { liters: true }, where }),
-      prisma.fuelVoucher.count({ where }),
-      prisma.fuelVoucher.groupBy({
-        by: ["vehicleNo"],
-        where,
-        _sum: { liters: true },
-        _count: { _all: true },
-        orderBy: { _sum: { liters: "desc" } },
-      }),
-    ]);
 
     const vehicleBreakdown = perVehicle.map((v) => ({
       vehicleNo: v.vehicleNo,
@@ -58,17 +80,21 @@ export async function GET(req: NextRequest) {
       vouchers: v._count._all,
     }));
 
-    return NextResponse.json({
+    const result = {
       year: start.getUTCFullYear(),
       month: start.getUTCMonth() + 1,
       requestedYear: year,
       requestedMonth: month,
       fallback,
       totalLiters: totalAgg._sum.liters ?? 0,
-      voucherCount: count,
+      voucherCount: totalAgg._count._all ?? 0,
       mostActiveVehicle: vehicleBreakdown[0]?.vehicleNo ?? null,
       vehicleBreakdown,
-    });
+    };
+
+    const res = NextResponse.json(result);
+    res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+    return res;
   } catch (err) {
     console.error("GET /api/stats failed", err);
     return NextResponse.json({ error: "Failed to compute stats" }, { status: 500 });

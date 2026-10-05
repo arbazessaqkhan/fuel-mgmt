@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { prisma, withDbRetry } from "@/lib/prisma";
 import { voucherCreateSchema } from "@/lib/validation";
 import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
@@ -27,13 +27,14 @@ export async function GET(req: NextRequest) {
 
     const range = monthRange(year, month);
 
-    const where = {
+    const where: Prisma.FuelVoucherWhereInput = {
       ...(range ? { date: { gte: range.start, lt: range.end } } : {}),
       ...(search
         ? {
             OR: [
-              { voucherNo: { contains: search } },
-              { vehicleNo: { contains: search } },
+              { voucherNo: { contains: search, mode: "insensitive" as const } },
+              { vehicleNo: { contains: search, mode: "insensitive" as const } },
+              { fuelType: { contains: search, mode: "insensitive" as const } },
             ],
           }
         : {}),
@@ -44,15 +45,17 @@ export async function GET(req: NextRequest) {
       ? (sortField as (typeof sortable)[number])
       : "date";
 
-    const [items, total] = await Promise.all([
-      prisma.fuelVoucher.findMany({
-        where,
-        orderBy: { [field]: sortDir },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prisma.fuelVoucher.count({ where }),
-    ]);
+    const [items, total] = await withDbRetry(() =>
+      Promise.all([
+        prisma.fuelVoucher.findMany({
+          where,
+          orderBy: { [field]: sortDir },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        prisma.fuelVoucher.count({ where }),
+      ])
+    );
 
     return NextResponse.json({ items, total, page, pageSize });
   } catch (err) {

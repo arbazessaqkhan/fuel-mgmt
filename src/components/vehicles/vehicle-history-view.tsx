@@ -4,10 +4,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, CalendarRange, Droplets, FileSpreadsheet, FileText, Gauge, TrendingUp } from "lucide-react";
+import { ArrowLeft, CalendarRange, Droplets, FileSpreadsheet, FileText, Gauge, Loader2, TrendingUp } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   Area,
   AreaChart,
@@ -140,10 +141,48 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rangeError, setRangeError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    const toastId = toast.loading(`Generating Excel workbook for ${vehicleNo}...`);
+    try {
+      const res = await fetch(`/api/export/excel?vehicleNo=${encodeURIComponent(vehicleNo)}`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `vehicle-${vehicleNo}-vouchers-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Excel report ready!", { id: toastId });
+    } catch {
+      toast.error("Export failed. Please try again.", { id: toastId });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Restore cached history for instant zero-skeleton rendering
+  useEffect(() => {
+    try {
+      const cached = sessionStorage.getItem(`fuellog_vehicle_${vehicleNo}`);
+      if (cached) {
+        setData(JSON.parse(cached));
+        setLoading(false);
+      }
+    } catch {}
+  }, [vehicleNo]);
 
   const load = useCallback(
     async (from: string | null, to: string | null) => {
-      setLoading(true);
+      // Only show skeleton if we don't already have data displayed or user filtered dates
+      if (from || to) {
+        setLoading(true);
+      }
       setNotFound(false);
       setError(null);
       try {
@@ -160,7 +199,13 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
           return;
         }
         if (!res.ok) throw new Error();
-        setData(await res.json());
+        const json = await res.json();
+        setData(json);
+        if (!from && !to) {
+          try {
+            sessionStorage.setItem(`fuellog_vehicle_${vehicleNo}`, JSON.stringify(json));
+          } catch {}
+        }
       } catch {
         setError("Could not load vehicle history. Please refresh.");
       } finally {
@@ -328,10 +373,19 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
               active={range.from === daysAgoIso(29) && range.to === todayIso()}
               onClick={() => applyRange(daysAgoIso(29), todayIso())}
             />
-            <Button asChild variant="outline" size="sm" className="gap-2">
-              <a href={`/api/export/excel?vehicleNo=${encodeURIComponent(vehicleNo)}`} download>
-                <FileSpreadsheet className="h-4 w-4" /> Export Vehicle to Excel
-              </a>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              {exporting ? "Generating..." : "Export Vehicle to Excel"}
             </Button>
           </div>
         </div>

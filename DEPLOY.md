@@ -6,8 +6,7 @@ Deploy the app on **Vercel** (frontend + backend), **Neon** (PostgreSQL database
 ---
 
 ## 0. What you need before starting
-- Your login credentials for the app: `AUTH_USERNAME` / `AUTH_PASSWORD` (currently
-  `EmpPdcFuel` / `EP@2026#` — keep them private; rotate before going live if you wish).
+- Your login credentials for the app: decide on your own `AUTH_USERNAME` and strong `AUTH_PASSWORD` (keep them private; configure them as Vercel environment variables).
 - A JSON backup of your existing vouchers (from the app: Dashboard → Backup, or
   `GET /api/backup` while logged in), if you want to carry existing data over.
 

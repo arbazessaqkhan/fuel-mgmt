@@ -34,6 +34,6 @@ export async function middleware(req: NextRequest) {
 export const config = {
   // Protect pages + APIs; skip Next internals and static assets.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|eng.traineddata|.*\\.(?:svg|ico|css|js|map|woff|woff2|txt|gz)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|eng.traineddata|.*\\.(?:svg|ico|png|jpg|jpeg|webp|css|js|map|woff|woff2|txt|gz)$).*)",
   ],
 };

@@ -13,8 +13,9 @@ import {
 } from "@/components/ui/select";
 import type { OcrResult } from "@/lib/ocr/types";
 import { AlertTriangle, Loader2, PencilLine, Save } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { compressImage } from "@/lib/image-compress";
 
 export interface VoucherFormValues {
   voucherNo: string;
@@ -69,6 +70,47 @@ export function VoucherForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Background pre-upload: compress & upload image to B2 immediately while user reviews fields
+  const [preUploadedUrl, setPreUploadedUrl] = useState<string | null>(null);
+  const uploadPromiseRef = useRef<Promise<string | null> | null>(null);
+
+  useEffect(() => {
+    if (!imageUrl) {
+      setPreUploadedUrl(null);
+      uploadPromiseRef.current = null;
+      return;
+    }
+    if (imageUrl.startsWith("/api/images/") || imageUrl.startsWith("/uploads/")) {
+      setPreUploadedUrl(imageUrl);
+      return;
+    }
+
+    let active = true;
+    const task = (async () => {
+      try {
+        const rawBlob = await fetch(imageUrl).then((r) => r.blob());
+        const blob = await compressImage(rawBlob);
+        const fd = new FormData();
+        fd.append("file", blob, "voucher.jpg");
+        const up = await fetch("/api/uploads", { method: "POST", body: fd });
+        if (up.ok) {
+          const ud = await up.json();
+          const finalUrl = ud.url ?? null;
+          if (active) setPreUploadedUrl(finalUrl);
+          return finalUrl;
+        }
+      } catch (err) {
+        console.warn("Background image upload error", err);
+      }
+      return null;
+    })();
+
+    uploadPromiseRef.current = task;
+    return () => {
+      active = false;
+    };
+  }, [imageUrl]);
+
   // Prefill when OCR results arrive
   const [prefilledFor, setPrefilledFor] = useState<OcrResult | null>(null);
   if (ocr && ocr !== prefilledFor) {
@@ -109,20 +151,22 @@ export function VoucherForm({
     setSaving(true);
     setFormError(null);
     try {
-      // Attach the uploaded image (best effort — a failed upload must not
-      // block saving the voucher itself).
-      let attachedImage: string | null = null;
-      if (imageUrl) {
+      // Use pre-uploaded image from background upload, or wait for it
+      let attachedImage: string | null = preUploadedUrl;
+      if (!attachedImage && uploadPromiseRef.current) {
+        attachedImage = await uploadPromiseRef.current;
+      }
+      // Fallback if background upload hadn't triggered yet
+      if (!attachedImage && imageUrl && !imageUrl.startsWith("/api/images/") && !imageUrl.startsWith("/uploads/")) {
         try {
-          const blob = await fetch(imageUrl).then((r) => r.blob());
+          const rawBlob = await fetch(imageUrl).then((r) => r.blob());
+          const blob = await compressImage(rawBlob);
           const fd = new FormData();
           fd.append("file", blob, "voucher.jpg");
           const up = await fetch("/api/uploads", { method: "POST", body: fd });
           if (up.ok) {
             const ud = await up.json();
             attachedImage = ud.url ?? null;
-          } else {
-            toast.warning("Image could not be stored — saving voucher without it.");
           }
         } catch {
           toast.warning("Image could not be stored — saving voucher without it.");
@@ -146,6 +190,14 @@ export function VoucherForm({
         toast.success("Voucher saved", {
           description: `${values.voucherNo} · ${values.vehicleNo} · ${values.liters} L`,
         });
+        // Invalidate dashboard caches so fresh data displays immediately
+        try {
+          sessionStorage.removeItem("fuellog_cached_stats");
+          sessionStorage.removeItem("fuellog_cached_vouchers");
+          sessionStorage.removeItem("fuellog_cached_total");
+        } catch {
+          // sessionStorage may not be accessible in all contexts
+        }
         // Clear all inputs so the next voucher can be entered immediately.
         setValues({ ...EMPTY, date: todayIso() });
         setPrefilledFor(null);
@@ -369,9 +421,6 @@ export function VoucherForm({
               <SelectItem value="Diesel">Diesel</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">
-            Pick whichever line is filled on the voucher — Petrol or Diesel.
-          </p>
         </div>
 
         <div className="space-y-1.5">

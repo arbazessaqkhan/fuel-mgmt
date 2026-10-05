@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, withDbRetry } from "@/lib/prisma";
 
 /**
  * GET /api/vehicles/[vehicleNo]/history?months=12
@@ -107,13 +107,22 @@ export async function GET(
       return NextResponse.json({ error: "Vehicle not found." }, { status: 404 });
     }
 
-    const vouchers = await prisma.fuelVoucher.findMany({
-      where: {
-        vehicleNo: { equals: plate },
-        date: { gte: rangeFrom, lt: rangeTo },
-      },
-      orderBy: { date: "asc" },
-    });
+    const [vouchers, recent] = await withDbRetry(() =>
+      Promise.all([
+        prisma.fuelVoucher.findMany({
+          where: {
+            vehicleNo: { equals: plate },
+            date: { gte: rangeFrom, lt: rangeTo },
+          },
+          orderBy: { date: "asc" },
+        }),
+        prisma.fuelVoucher.findMany({
+          where: { vehicleNo: { equals: plate } },
+          orderBy: { date: "desc" },
+          take: 10,
+        }),
+      ])
+    );
 
     // Bucket by YYYY-MM — ONLY months with actual data are included, so the
     // chart/table show active months without zero-fill padding.
@@ -137,16 +146,10 @@ export async function GET(
         vouchers,
       }));
 
-    const recent = await prisma.fuelVoucher.findMany({
-      where: { vehicleNo: { equals: plate } },
-      orderBy: { date: "desc" },
-      take: 10,
-    });
-
     const totalLiters = monthRows.reduce((s, m) => s + m.liters, 0);
     const totalVouchers = monthRows.reduce((s, m) => s + m.vouchers, 0);
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       vehicleNo: plate,
       fromMonth,
       toMonth: toMonthKey,
@@ -156,6 +159,8 @@ export async function GET(
       months: monthRows,
       recent,
     });
+    res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+    return res;
   } catch (err) {
     console.error("vehicle history failed:", err);
     return NextResponse.json({ error: "Could not load vehicle history." }, { status: 500 });

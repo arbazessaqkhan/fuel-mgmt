@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { MetricCards, type Stats } from "@/components/dashboard/metric-cards";
 import { VoucherTable } from "@/components/dashboard/voucher-table";
 import { VehicleChart } from "@/components/dashboard/vehicle-chart";
-import { FileSpreadsheet } from "lucide-react";
+import { FileSpreadsheet, Loader2 } from "lucide-react";
 import type { FuelVoucher as Voucher } from "@prisma/client";
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 
 type SortField = "date" | "voucherNo" | "vehicleNo" | "liters";
 
@@ -26,44 +27,111 @@ export default function DashboardPage() {
   const [loadingStats, setLoadingStats] = useState(true);
   const [loadingTable, setLoadingTable] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const pageSize = 10;
 
-  const loadStats = useCallback(async () => {
-    setLoadingStats(true);
+  const handleExport = async () => {
+    setExporting(true);
+    const toastId = toast.loading("Generating Excel workbook with receipt images...");
     try {
-      const res = await fetch(`/api/stats`);
-      if (!res.ok) throw new Error();
-      setStats(await res.json());
-      setError(null);
+      const res = await fetch("/api/export/excel");
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `all-vouchers-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Excel download ready!", { id: toastId });
     } catch {
-      setError("Could not load statistics. Please refresh.");
+      toast.error("Export failed. Please try again.", { id: toastId });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Restore cached data on mount for instant zero-skeleton rendering
+  useEffect(() => {
+    try {
+      const cachedStats = sessionStorage.getItem("fuellog_cached_stats");
+      if (cachedStats) {
+        setStats(JSON.parse(cachedStats));
+        setLoadingStats(false);
+      }
+      const cachedVouchers = sessionStorage.getItem("fuellog_cached_vouchers");
+      const cachedTotal = sessionStorage.getItem("fuellog_cached_total");
+      if (cachedVouchers && page === 1 && !search) {
+        setVouchers(JSON.parse(cachedVouchers));
+        if (cachedTotal) setTotal(Number(cachedTotal));
+        setLoadingTable(false);
+      }
+    } catch {}
+  }, []);
+
+  const loadStats = useCallback(async (retry = true) => {
+    try {
+      const res = await fetch(`/api/stats?t=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setStats(data);
+      setError(null);
+      try {
+        sessionStorage.setItem("fuellog_cached_stats", JSON.stringify(data));
+      } catch {}
+    } catch {
+      if (retry) {
+        // Auto-retry once in case database was in a cold-start wake-up
+        setTimeout(() => loadStats(false), 1200);
+        return;
+      }
+      setError("Could not load statistics.");
     } finally {
       setLoadingStats(false);
     }
   }, []);
 
-  const loadVouchers = useCallback(async () => {
-    setLoadingTable(true);
+  const loadVouchers = useCallback(async (retry = true) => {
+    // Only show skeleton if we have no vouchers displayed yet or filtering
+    if (vouchers.length === 0 || page !== 1 || search) {
+      setLoadingTable(true);
+    }
     try {
       // No year/month params: the table lists the FULL voucher history;
       // stats cards + chart stay scoped to the current month.
       const params = new URLSearchParams({
         page: String(page),
-        pageSize: String(pageSize), sortField, sortDir,
+        pageSize: String(pageSize),
+        sortField,
+        sortDir,
+        _t: String(Date.now()),
       });
       if (search) params.set("search", search);
-      const res = await fetch(`/api/vouchers?${params}`);
+      const res = await fetch(`/api/vouchers?${params}`, { cache: "no-store" });
       if (!res.ok) throw new Error();
       const data = await res.json();
       setVouchers(data.items);
       setTotal(data.total);
       setError(null);
+      if (page === 1 && !search) {
+        try {
+          sessionStorage.setItem("fuellog_cached_vouchers", JSON.stringify(data.items));
+          sessionStorage.setItem("fuellog_cached_total", String(data.total));
+        } catch {}
+      }
     } catch {
-      setError("Could not load vouchers. Please refresh.");
+      if (retry) {
+        // Auto-retry once in case database was in a cold-start wake-up
+        setTimeout(() => loadVouchers(false), 1200);
+        return;
+      }
+      setError("Could not load vouchers.");
     } finally {
       setLoadingTable(false);
     }
-  }, [page, search, sortField, sortDir]);
+  }, [page, search, sortField, sortDir, vouchers.length]);
 
   useEffect(() => { loadStats(); }, [loadStats]);
   useEffect(() => { loadVouchers(); }, [loadVouchers]);
@@ -84,8 +152,14 @@ export default function DashboardPage() {
   };
 
   const refreshAll = () => {
-    loadStats();
-    loadVouchers();
+    setError(null);
+    try {
+      sessionStorage.removeItem("fuellog_cached_stats");
+      sessionStorage.removeItem("fuellog_cached_vouchers");
+      sessionStorage.removeItem("fuellog_cached_total");
+    } catch {}
+    loadStats(false);
+    loadVouchers(false);
   };
 
   return (
@@ -99,24 +173,40 @@ export default function DashboardPage() {
             Monthly fuel consumption across your fleet.
           </p>
         </div>
-        <Button asChild variant="outline" className="gap-2">
-          <a href="/api/export/excel" download>
-            <FileSpreadsheet className="h-4 w-4" /> Export All to Excel
-          </a>
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={handleExport}
+          disabled={exporting}
+        >
+          {exporting ? (
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          ) : (
+            <FileSpreadsheet className="h-4 w-4" />
+          )}
+          {exporting ? "Generating..." : "Export All to Excel"}
         </Button>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {error}
+        <div className="flex items-center justify-between rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <span>{error}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={refreshAll}
+            className="h-7 text-xs border-destructive/40 hover:bg-destructive/15 text-destructive"
+          >
+            Retry
+          </Button>
         </div>
       )}
 
       <MetricCards stats={stats} loading={loadingStats} />
 
-      <div className="grid min-w-0 gap-6 xl:grid-cols-5">
-        <Card className="card-premium min-w-0 border-border/60 xl:col-span-3">
-          <CardContent className="pt-6">
+      <div className="grid min-w-0 items-stretch gap-6 xl:grid-cols-5">
+        <Card className="card-premium min-w-0 border-border/60 xl:col-span-3 flex flex-col h-full">
+          <CardContent className="pt-6 flex flex-1 flex-col">
             <VoucherTable
               vouchers={vouchers}
               total={total}
@@ -133,7 +223,7 @@ export default function DashboardPage() {
             />
           </CardContent>
         </Card>
-        <div className="min-w-0 xl:col-span-2">
+        <div className="min-w-0 xl:col-span-2 flex flex-col h-full">
           <VehicleChart stats={stats} loading={loadingStats} />
         </div>
       </div>

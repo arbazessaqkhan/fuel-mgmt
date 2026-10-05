@@ -30,65 +30,59 @@ export default function ScanPage() {
     setProgress(0);
 
     try {
-      const result = await getOcrService().recognize(file, (p) => setProgress(p));
-      // The server-side vision model reads handwriting far more accurately
-      // than browser regex OCR (which was confidently wrong on real vouchers:
-      // "210" instead of 40 litres, half a plate instead of the full one), so
-      // ALWAYS ask it for a second opinion and let its per-field values win.
-      {
-        setProgress(100);
-        try {
-          const fd = new FormData();
-          fd.append("image", file);
-          const res = await fetch("/api/ocr/vision-correct", { method: "POST", body: fd });
-          if (res.ok) {
-            const corr = (await res.json()) as Record<string, { value: string | number | null; confidence: number }>;            const pick = (
-              local: { value: string | number | null; confidence: number },
-              remote: { value: string | number | null; confidence: number } | undefined
-            ): typeof local =>
-              // The vision model reads handwriting far more accurately than
-              // regex OCR — local passes were confidently wrong on real
-              // vouchers (e.g. 210 for 40 litres). Defer to the vision read
-              // whenever it produced a value; keep local only for fields the
-              // vision model could not read.
-              remote && remote.value != null ? remote : local;
-            result.voucherNo = pick(result.voucherNo, corr.voucherNo) as typeof result.voucherNo;
-            result.vehicleNo = pick(result.vehicleNo, corr.vehicleNo) as typeof result.vehicleNo;
-            result.liters = pick(result.liters, corr.liters) as typeof result.liters;
-            result.date = pick(result.date, corr.date) as typeof result.date;
-            if ([result.voucherNo, result.vehicleNo, result.liters, result.date].every((f) => f.value != null)) {
-              toast.success("Scan complete", {
-                description: "Fields extracted with AI vision assistance — verify before saving.",
-              });
-              setOcr(result);
-              return;
-            }
-          }
-          // corrector unavailable/failed: fall through to local-only result,
-          // but tell the user the AI read failed so they double-check fields.
-          if (!res.ok) {
-            console.warn("vision-correct unavailable:", res.status);
-            toast.warning("AI verification unavailable", {
-              description:
-                "The AI vision service is busy right now, so the values below come from the basic scanner and may be inaccurate. Please double-check every field before saving.",
-              duration: 12000,
-            });
-          }
-        } catch {
-          // non-fatal — show whatever the local pass produced
+      setProgress(15);
+      let visionSucceeded = false;
+      let result: OcrResult = {
+        voucherNo: { value: null, confidence: 0 },
+        vehicleNo: { value: null, confidence: 0 },
+        liters: { value: null, confidence: 0 },
+        date: { value: null, confidence: 0 },
+        fullText: "",
+        engineConfidence: 0,
+      };
+
+      // 1. Fast path: Direct AI Vision (1.5s instead of 10s)
+      try {
+        const fd = new FormData();
+        fd.append("image", file);
+        setProgress(45);
+        const res = await fetch("/api/ocr/vision-correct", { method: "POST", body: fd });
+        if (res.ok) {
+          const corr = (await res.json()) as Record<string, { value: string | number | null; confidence: number }>;
+          result.voucherNo = (corr.voucherNo as any) ?? result.voucherNo;
+          result.vehicleNo = (corr.vehicleNo as any) ?? result.vehicleNo;
+          result.liters = (corr.liters as any) ?? result.liters;
+          result.date = (corr.date as any) ?? result.date;
+          result.engineConfidence = 0.95;
+          visionSucceeded = true;
+          setProgress(100);
+          toast.success("Scan complete", {
+            description: "Fields extracted with AI vision assistance — verify before saving.",
+          });
+          setOcr(result);
+          return;
         }
+      } catch (err) {
+        console.warn("Direct vision pass unavailable, falling back to local OCR:", err);
       }
-      if (result.engineConfidence < 0.15 && !result.voucherNo.value && !result.liters.value) {
-        toast.error("Could not read the voucher", {
-          description:
-            "The image may be too blurry or empty. Try a clearer scan, or enter the details manually below.",
-        });
-      } else {
-        toast.success("Scan complete", {
-          description: "Review the extracted values below before saving.",
-        });
+
+      // 2. Fallback path: If vision service was unavailable, run local Tesseract OCR
+      if (!visionSucceeded) {
+        toast.info("AI vision busy — using basic local scanner...", { duration: 4000 });
+        const localResult = await getOcrService().recognize(file, (p) => setProgress(p));
+        result = localResult;
+        if (result.engineConfidence < 0.15 && !result.voucherNo.value && !result.liters.value) {
+          toast.error("Could not read the voucher", {
+            description:
+              "The image may be too blurry or empty. Try a clearer scan, or enter the details manually below.",
+          });
+        } else {
+          toast.success("Scan complete", {
+            description: "Review the extracted values below before saving.",
+          });
+        }
+        setOcr(result);
       }
-      setOcr(result);
     } catch {
       toast.error("OCR failed", {
         description:

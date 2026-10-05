@@ -14,7 +14,7 @@ import {
 import type { FuelVoucher as Voucher } from "@prisma/client";
 import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, Pencil, Search, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -64,6 +64,21 @@ export function VoucherTable(props: VoucherTableProps) {
     onSearch, onSort, onPage, onChanged,
   } = props;
   const [searchInput, setSearchInput] = useState(search);
+
+  // Debounce search input so results filter automatically as you type (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchInput !== search) {
+        onSearch(searchInput);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput, search, onSearch]);
+
+  // Keep local search input synced if external search prop changes
+  useEffect(() => {
+    setSearchInput(search);
+  }, [search]);
   const [deleting, setDeleting] = useState<Voucher | null>(null);
   const [edit, setEdit] = useState<Voucher | null>(null);
   const [editValues, setEditValues] = useState({
@@ -224,43 +239,61 @@ export function VoucherTable(props: VoucherTableProps) {
   }
 
   return (
-    <div className="space-y-3">
-      {selected.size > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5">
-          <span className="text-sm font-medium">
-            {selected.size} voucher{selected.size === 1 ? "" : "s"} selected
-          </span>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={clearSelection} disabled={bulkBusy}>
-              <X className="mr-1 h-4 w-4" /> Clear
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setBulkConfirm(true)}
-              disabled={bulkBusy}
-            >
-              <Trash2 className="mr-1.5 h-4 w-4" /> Delete selected
-            </Button>
+    <div className="flex h-full flex-col justify-between space-y-4">
+      <div className="flex flex-1 flex-col space-y-3">
+        {selected.size > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5">
+            <span className="text-sm font-medium">
+              {selected.size} voucher{selected.size === 1 ? "" : "s"} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={clearSelection} disabled={bulkBusy}>
+                <X className="mr-1 h-4 w-4" /> Clear
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setBulkConfirm(true)}
+                disabled={bulkBusy}
+              >
+                <Trash2 className="mr-1.5 h-4 w-4" /> Delete selected
+              </Button>
+            </div>
           </div>
+        )}
+
+        <div className="relative max-w-sm">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onSearch(searchInput);
+              }
+            }}
+            placeholder="Search voucher or vehicle no…"
+            className="pl-8 pr-8"
+            aria-label="Search vouchers"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchInput("");
+                onSearch("");
+              }}
+              className="absolute right-2.5 top-2.5 rounded-sm opacity-70 hover:opacity-100 transition-opacity focus:outline-none"
+              aria-label="Clear search"
+            >
+              <X className="h-4 w-4 text-muted-foreground" />
+            </button>
+          )}
         </div>
-      )}
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onSearch(searchInput)}
-          onBlur={() => searchInput !== search && onSearch(searchInput)}
-          placeholder="Search voucher or vehicle no…"
-          className="pl-8"
-          aria-label="Search vouchers"
-        />
-      </div>
-
-      <div className="max-w-full overflow-x-auto rounded-lg border [&_table]:min-w-[420px] [&_table]:max-w-none">
-        <Table>
+        <div className="flex-1 min-h-[320px] max-w-full overflow-x-auto rounded-lg border [&_table]:min-w-[420px] [&_table]:max-w-none">
+          <Table>
           <TableHeader>
             <TableRow>
               {columns.map((c) => (
@@ -379,22 +412,37 @@ export function VoucherTable(props: VoucherTableProps) {
           </TableBody>
         </Table>
       </div>
+      </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-3 text-sm text-muted-foreground border-t border-border/40 mt-auto">
         <span>
-          {total > 0
-            ? `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}`
-            : "0 vouchers"}
+          {total === 0
+            ? "0 vouchers"
+            : total === 1
+            ? "1 voucher total"
+            : `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total} vouchers`}
         </span>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>
-            Previous
-          </Button>
-          <span>Page {page} / {totalPages}</span>
-          <Button variant="outline" size="sm" disabled={page >= totalPages || loading} onClick={() => onPage(page + 1)}>
-            Next
-          </Button>
-        </div>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1 || loading}
+              onClick={() => onPage(page - 1)}
+            >
+              Previous
+            </Button>
+            <span className="text-xs font-medium">Page {page} of {totalPages}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages || loading}
+              onClick={() => onPage(page + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Bulk delete confirmation */}

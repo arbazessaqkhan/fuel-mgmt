@@ -48,6 +48,17 @@ const MIME: Record<string, string> = {
   webp: "image/webp",
 };
 
+const imageMemoryCache = new Map<string, Buffer>();
+const MAX_IMAGE_CACHE = 150;
+
+function cacheImage(key: string, buf: Buffer) {
+  if (imageMemoryCache.size >= MAX_IMAGE_CACHE) {
+    const oldestKey = imageMemoryCache.keys().next().value;
+    if (oldestKey) imageMemoryCache.delete(oldestKey);
+  }
+  imageMemoryCache.set(key, buf);
+}
+
 export function imageMime(key: string): string | undefined {
   return MIME[key.split(".").pop()?.toLowerCase() ?? ""];
 }
@@ -57,6 +68,7 @@ export async function putVoucherImage(
   ext: string
 ): Promise<{ key: string }> {
   const key = newImageKey(ext);
+  cacheImage(key, bytes);
   await client().send(
     new PutObjectCommand({
       Bucket: B2_BUCKET,
@@ -69,11 +81,16 @@ export async function putVoucherImage(
 }
 
 export async function getVoucherImage(key: string): Promise<Buffer | null> {
+  const cached = imageMemoryCache.get(key);
+  if (cached) return cached;
+
   try {
     const res = await client().send(
       new GetObjectCommand({ Bucket: B2_BUCKET, Key: key })
     );
-    return Buffer.from(await res.Body!.transformToByteArray());
+    const buf = Buffer.from(await res.Body!.transformToByteArray());
+    cacheImage(key, buf);
+    return buf;
   } catch {
     return null;
   }

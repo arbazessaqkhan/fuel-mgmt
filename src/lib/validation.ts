@@ -28,7 +28,10 @@ export const voucherCreateSchema = z.object({
     .string()
     .trim()
     .max(500, "Image URL too long")
-    .regex(/^\/uploads\/f\/[A-Za-z0-9._-]+$/, "Image URL must be a local /uploads/ path")
+    .regex(
+      /^(?:\/api\/images\/vouchers\/[A-Za-z0-9-]+\.(?:jpg|jpeg|png|webp)|\/uploads\/f\/[A-Za-z0-9._-]+)$/,
+      "Invalid image URL"
+    )
     .nullish(),
 });
 

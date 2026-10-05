@@ -1,8 +1,8 @@
 // Auth E2E: logged-out redirect, bad credentials, login, persistence, logout, API 401.
 const { chromium } = require("playwright");
 const BASE = "http://localhost:3000";
-const USER = "EmpPdcFuel";
-const PASS = "EP@2026#";
+const USER = process.env.AUTH_USERNAME || "EmpPdcFuel";
+const PASS = process.env.AUTH_PASSWORD || "test-password";
 
 (async () => {
   const results = [];

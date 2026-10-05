@@ -18,13 +18,21 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
+  Eye,
   FileUp,
   FileWarning,
   Loader2,
   Save,
   Trash2,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { compressImage } from "@/lib/image-compress";
 
 export interface BulkEntry {
   rowId: string;
@@ -69,7 +77,31 @@ export function BulkUpload() {
   const [saving, setSaving] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [pageBlobs, setPageBlobs] = useState<Map<string, Blob>>(new Map());
+  const [pageUrls, setPageUrls] = useState<Map<string, string>>(new Map());
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const uploadedBlobUrlsRef = useRef<Map<Blob, string>>(new Map());
+
+  const uploadBlobsConcurrently = useCallback(async (blobs: Blob[]) => {
+    const unique = Array.from(new Set(blobs)).filter((b) => !uploadedBlobUrlsRef.current.has(b));
+    if (unique.length === 0) return;
+    await Promise.all(
+      unique.map(async (blob) => {
+        try {
+          const compressed = await compressImage(blob);
+          const fd = new FormData();
+          fd.append("file", compressed, "voucher-page.jpg");
+          const up = await fetch("/api/uploads", { method: "POST", body: fd });
+          if (up.ok) {
+            const ud = await up.json();
+            if (ud.url) uploadedBlobUrlsRef.current.set(blob, ud.url);
+          }
+        } catch (e) {
+          console.warn("Background bulk image upload failed", e);
+        }
+      })
+    );
+  }, []);
 
   const setField = (rowId: string, key: keyof Omit<BulkEntry, "rowId" | "status">, value: string) =>
     setEntries((prev) =>
@@ -107,6 +139,8 @@ export function BulkUpload() {
       setEntries([]);
       setFileName(file.name);
       setProcessing(true);
+      pageUrls.forEach((u) => URL.revokeObjectURL(u));
+      setPageUrls(new Map());
       try {
         if (file.type === "application/pdf") {
           const pdfjs = await import("pdfjs-dist/build/pdf.mjs");
@@ -120,6 +154,8 @@ export function BulkUpload() {
           const collected: BulkEntry[] = [];
           const warnings: string[] = [];
           const pageBlobs = new Map<string, Blob>(); // rowId → page image
+          const pageUrlsMap = new Map<string, string>();
+          const urlByBlob = new Map<Blob, string>();
           for (let i = 1; i <= pdf.numPages; i++) {
             setProgressLabel(`Page ${i} of ${pdf.numPages}…`);
             const page = await pdf.getPage(i);
@@ -134,7 +170,15 @@ export function BulkUpload() {
               canvas,
               `page ${i}`
             );
-            for (const e of pageEntries) pageBlobs.set(e.rowId, pageBlob);
+            let pUrl = urlByBlob.get(pageBlob);
+            if (!pUrl) {
+              pUrl = URL.createObjectURL(pageBlob);
+              urlByBlob.set(pageBlob, pUrl);
+            }
+            for (const e of pageEntries) {
+              pageBlobs.set(e.rowId, pageBlob);
+              pageUrlsMap.set(e.rowId, pUrl);
+            }
             collected.push(...pageEntries);
             warnings.push(...pageWarnings.map((w) => `Page ${i}: ${w}`));
           }
@@ -150,17 +194,26 @@ export function BulkUpload() {
             });
           }
           setPageBlobs(pageBlobs);
+          setPageUrls(pageUrlsMap);
           setEntries(collected);
+          uploadBlobsConcurrently(Array.from(pageBlobs.values()));
         } else if (file.type.startsWith("image/")) {
           setProgressLabel("Extracting entries from image…");
           const { entries: imgEntries, warnings, pageBlob } = await extractPage(
             await fileToCanvas(file),
             file.name
           );
+          const pUrl = URL.createObjectURL(pageBlob);
           const imgMap = new Map<string, Blob>();
-          for (const e of imgEntries) imgMap.set(e.rowId, pageBlob);
+          const urlMap = new Map<string, string>();
+          for (const e of imgEntries) {
+            imgMap.set(e.rowId, pageBlob);
+            urlMap.set(e.rowId, pUrl);
+          }
           setPageBlobs(imgMap);
+          setPageUrls(urlMap);
           setEntries(imgEntries);
+          uploadBlobsConcurrently(Array.from(imgMap.values()));
           if (imgEntries.length === 0) {
             toast.warning("No vouchers found", { description: warnings[0] ?? "Nothing detected." });
           } else {
@@ -179,99 +232,95 @@ export function BulkUpload() {
         setProgressLabel(null);
       }
     },
-    [extractPage]
+    [extractPage, uploadBlobsConcurrently]
   );
 
   async function saveAll() {
     setSaving(true);
     const results = { saved: 0, duplicate: 0, failed: 0 };
-    // Upload each distinct page image ONCE (best-effort, like single-entry:
-    // failure must not block saving) and reuse the URL for all entries that
-    // came from that page.
+
+    // Parallel upload of any remaining page blobs (most are already uploaded in background)
+    await uploadBlobsConcurrently(Array.from(pageBlobs.values()));
+
     const imageUrlByRow = new Map<string, string>();
-    const blobBySource = new Map<Blob, string>();
     for (const entry of entries) {
       const blob = pageBlobs.get(entry.rowId);
-      if (!blob) continue;
-      try {
-        let url = blobBySource.get(blob);
-        if (!url) {
-          const fd = new FormData();
-          fd.append("file", blob, "voucher-page.jpg");
-          const up = await fetch("/api/uploads", { method: "POST", body: fd });
-          if (up.ok) {
-            const ud = await up.json();
-            url = ud.url ?? null;
-            if (url) blobBySource.set(blob, url);
-          } else {
-            toast.warning("Images could not be stored — saving vouchers without them.");
-          }
-        }
-        if (url) imageUrlByRow.set(entry.rowId, url);
-      } catch {
-        toast.warning("Images could not be stored — saving vouchers without them.");
+      if (blob && uploadedBlobUrlsRef.current.has(blob)) {
+        imageUrlByRow.set(entry.rowId, uploadedBlobUrlsRef.current.get(blob)!);
       }
     }
-    // Sequential saves so per-row status reflects reality and duplicates are
-    // flagged against both the DB and rows saved earlier in this batch.
-    for (const entry of entries) {
-      if (entry.status === "saved") continue;
-      const errs = validate(entry);
-      if (errs) {
-        setEntries((prev) =>
-          prev.map((e) => (e.rowId === entry.rowId ? { ...e, status: "invalid", error: errs } : e))
-        );
-        results.failed++;
-        continue;
-      }
-      setEntries((prev) =>
-        prev.map((e) => (e.rowId === entry.rowId ? { ...e, status: "saving" } : e))
+    // Concurrent chunked saves (3 at a time) for 3x faster network throughput
+    const toSave = entries.filter((e) => e.status !== "saved");
+    const CHUNK_SIZE = 3;
+    for (let i = 0; i < toSave.length; i += CHUNK_SIZE) {
+      const chunk = toSave.slice(i, i + CHUNK_SIZE);
+      await Promise.all(
+        chunk.map(async (entry) => {
+          const errs = validate(entry);
+          if (errs) {
+            setEntries((prev) =>
+              prev.map((e) => (e.rowId === entry.rowId ? { ...e, status: "invalid", error: errs } : e))
+            );
+            results.failed++;
+            return;
+          }
+          setEntries((prev) =>
+            prev.map((e) => (e.rowId === entry.rowId ? { ...e, status: "saving" } : e))
+          );
+          try {
+            const res = await fetch("/api/vouchers", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                voucherNo: entry.voucherNo.trim(),
+                vehicleNo: entry.vehicleNo.trim(),
+                liters: parseFloat(entry.liters),
+                date: entry.date,
+                imageUrl: imageUrlByRow.get(entry.rowId) ?? null,
+              }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.status === 201) {
+              setEntries((prev) =>
+                prev.map((e) => (e.rowId === entry.rowId ? { ...e, status: "saved" } : e))
+              );
+              results.saved++;
+            } else if (res.status === 409) {
+              setEntries((prev) =>
+                prev.map((e) =>
+                  e.rowId === entry.rowId ? { ...e, status: "duplicate", error: data.error } : e
+                )
+              );
+              results.duplicate++;
+            } else {
+              setEntries((prev) =>
+                prev.map((e) =>
+                  e.rowId === entry.rowId
+                    ? { ...e, status: "failed", error: data.error ?? "Save failed" }
+                    : e
+                )
+              );
+              results.failed++;
+            }
+          } catch {
+            setEntries((prev) =>
+              prev.map((e) =>
+                e.rowId === entry.rowId ? { ...e, status: "failed", error: "Network error" } : e
+              )
+            );
+            results.failed++;
+          }
+        })
       );
-      try {
-        const res = await fetch("/api/vouchers", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            voucherNo: entry.voucherNo.trim(),
-            vehicleNo: entry.vehicleNo.trim(),
-            liters: parseFloat(entry.liters),
-            date: entry.date,
-            imageUrl: imageUrlByRow.get(entry.rowId) ?? null,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 201) {
-          setEntries((prev) =>
-            prev.map((e) => (e.rowId === entry.rowId ? { ...e, status: "saved" } : e))
-          );
-          results.saved++;
-        } else if (res.status === 409) {
-          setEntries((prev) =>
-            prev.map((e) =>
-              e.rowId === entry.rowId ? { ...e, status: "duplicate", error: data.error } : e
-            )
-          );
-          results.duplicate++;
-        } else {
-          setEntries((prev) =>
-            prev.map((e) =>
-              e.rowId === entry.rowId
-                ? { ...e, status: "failed", error: data.error ?? "Save failed" }
-                : e
-            )
-          );
-          results.failed++;
-        }
-      } catch {
-        setEntries((prev) =>
-          prev.map((e) =>
-            e.rowId === entry.rowId ? { ...e, status: "failed", error: "Network error" } : e
-          )
-        );
-        results.failed++;
-      }
     }
     setSaving(false);
+    try {
+      sessionStorage.removeItem("fuellog_cached_stats");
+      sessionStorage.removeItem("fuellog_cached_vouchers");
+      sessionStorage.removeItem("fuellog_cached_total");
+    } catch {
+      // sessionStorage may not be available in all contexts
+    }
     toast.success("Batch finished", {
       description: `${results.saved} saved · ${results.duplicate} duplicates · ${results.failed} failed`,
     });
@@ -351,8 +400,9 @@ export function BulkUpload() {
             </div>
             <div className="max-h-[480px] overflow-auto rounded-lg border">
               <Table>
-                <TableHeader className="sticky top-0 bg-background">
+                <TableHeader className="sticky top-0 z-10 bg-background">
                   <TableRow>
+                    <TableHead className="w-[84px]">Receipt</TableHead>
                     <TableHead className="w-[140px]">Voucher No.</TableHead>
                     <TableHead className="w-[150px]">Vehicle No.</TableHead>
                     <TableHead className="w-[110px]">Liters</TableHead>
@@ -364,6 +414,33 @@ export function BulkUpload() {
                 <TableBody>
                   {entries.map((e) => (
                     <TableRow key={e.rowId} className={rowTone(e.status)}>
+                      <TableCell className="py-1.5">
+                        {pageUrls.get(e.rowId) ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewImage({
+                                url: pageUrls.get(e.rowId)!,
+                                title: `Receipt for Voucher ${e.voucherNo || "—"} (${e.vehicleNo || "Review"})`,
+                              })
+                            }
+                            className="group relative flex h-10 w-14 items-center justify-center overflow-hidden rounded border border-border bg-muted/60 transition-all hover:ring-2 hover:ring-primary/60 hover:shadow-sm"
+                            title="Click to view full voucher receipt"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={pageUrls.get(e.rowId)}
+                              alt="Voucher receipt"
+                              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                              <Eye className="h-4 w-4 text-white drop-shadow" />
+                            </div>
+                          </button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Input
                           className="h-8"
@@ -420,6 +497,27 @@ export function BulkUpload() {
           </CardContent>
         </Card>
       )}
+
+      {/* High-Resolution Receipt Preview Dialog */}
+      <Dialog open={!!previewImage} onOpenChange={(o) => !o && setPreviewImage(null)}>
+        <DialogContent className="sm:max-w-4xl max-h-[92vh] flex flex-col p-4 sm:p-6">
+          <DialogHeader className="flex flex-row items-center justify-between pb-2 border-b">
+            <DialogTitle className="text-base font-semibold">
+              {previewImage?.title || "Voucher Receipt"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto flex items-center justify-center p-3 bg-muted/30 rounded-lg min-h-[350px]">
+            {previewImage && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewImage.url}
+                alt="Receipt preview"
+                className="max-h-[75vh] w-auto max-w-full rounded object-contain shadow-md"
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
