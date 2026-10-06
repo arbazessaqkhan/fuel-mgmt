@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { compressImage } from "@/lib/image-compress";
+import { cn } from "@/lib/utils";
 
 export interface BulkEntry {
   rowId: string;
@@ -76,6 +77,7 @@ export function BulkUpload() {
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [pageBlobs, setPageBlobs] = useState<Map<string, Blob>>(new Map());
   const [pageUrls, setPageUrls] = useState<Map<string, string>>(new Map());
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
@@ -142,12 +144,15 @@ export function BulkUpload() {
       pageUrls.forEach((u) => URL.revokeObjectURL(u));
       setPageUrls(new Map());
       try {
-        if (file.type === "application/pdf") {
+        const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+        const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp|avif|bmp)$/i.test(file.name);
+
+        if (isPdf) {
           const pdfjs = await import("pdfjs-dist/build/pdf.mjs");
-          // Vite/webpack-safe worker setup: use the bundled worker via a CDN-free
-          // local URL so no network access is needed at runtime.
-          const workerUrl = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
-          pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+          // Reliable local worker setup: use the bundled worker served via /pdf.worker.min.mjs
+          if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+            pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+          }
 
           const buf = await file.arrayBuffer();
           const pdf = await pdfjs.getDocument({ data: buf }).promise;
@@ -197,7 +202,7 @@ export function BulkUpload() {
           setPageUrls(pageUrlsMap);
           setEntries(collected);
           uploadBlobsConcurrently(Array.from(pageBlobs.values()));
-        } else if (file.type.startsWith("image/")) {
+        } else if (isImage) {
           setProgressLabel("Extracting entries from image…");
           const { entries: imgEntries, warnings, pageBlob } = await extractPage(
             await fileToCanvas(file),
@@ -332,8 +337,26 @@ export function BulkUpload() {
   return (
     <div className="space-y-4">
       <div
-        className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border px-6 py-10 text-center transition-colors hover:border-primary/50 hover:bg-accent/40"
+        className={cn(
+          "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors",
+          dragOver
+            ? "border-primary bg-primary/5"
+            : "border-border hover:border-primary/50 hover:bg-accent/40",
+          processing && "cursor-wait opacity-80"
+        )}
         onClick={() => !processing && inputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!processing) setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          if (processing) return;
+          const f = e.dataTransfer.files?.[0];
+          if (f) handleFile(f);
+        }}
         role="button"
         tabIndex={0}
         onKeyDown={(e) => e.key === "Enter" && !processing && inputRef.current?.click()}

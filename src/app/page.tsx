@@ -206,7 +206,7 @@ export default function DashboardPage() {
 
       <div className="grid min-w-0 items-stretch gap-6 xl:grid-cols-5">
         <Card className="card-premium min-w-0 border-border/60 xl:col-span-3 flex flex-col h-full">
-          <CardContent className="pt-6 flex flex-1 flex-col">
+          <CardContent className="p-4 sm:p-6 flex flex-1 flex-col">
             <VoucherTable
               vouchers={vouchers}
               total={total}

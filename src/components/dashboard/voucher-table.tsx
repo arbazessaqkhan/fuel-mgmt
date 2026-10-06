@@ -292,10 +292,10 @@ export function VoucherTable(props: VoucherTableProps) {
           )}
         </div>
 
-        <div className="flex-1 min-h-[320px] max-w-full overflow-x-auto rounded-lg border [&_table]:min-w-[420px] [&_table]:max-w-none">
-          <Table>
+        <div className="flex-1 min-h-[300px] w-full rounded-xl border border-border/70 overflow-hidden bg-card shadow-xs">
+          <Table className="w-full">
           <TableHeader>
-            <TableRow>
+            <TableRow className="hover:bg-transparent">
               {columns.map((c) => (
                 <TableHead key={c.key} className={c.key === "select" ? "w-10 pr-0" : undefined}>
                   {c.key === "select" ? (
@@ -332,8 +332,8 @@ export function VoucherTable(props: VoucherTableProps) {
                 </TableRow>
               ))
             ) : vouchers.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground select-none">
                   {search
                     ? `No vouchers match "${search}" in this month.`
                     : "No vouchers for this month yet. Scan one to get started."}
@@ -343,7 +343,7 @@ export function VoucherTable(props: VoucherTableProps) {
               vouchers.map((v) => (
                 <TableRow
                   key={v.id}
-                  className="cursor-pointer transition-colors hover:bg-muted/60"
+                  className="cursor-pointer transition-colors hover:bg-muted/40 active:bg-muted/60"
                   onClick={() => router.push(`/vehicles/${encodeURIComponent(v.vehicleNo)}`)}
                 >
                   <TableCell className="pr-0" onClick={(e) => e.stopPropagation()}>

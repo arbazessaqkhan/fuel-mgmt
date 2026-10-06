@@ -4,16 +4,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { getOcrService } from "@/lib/ocr/tesseract-adapter";
 import type { OcrResult } from "@/lib/ocr/types";
-import { ScanLine } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { UploadZone } from "@/components/scanner/upload-zone";
 import { VoucherForm } from "@/components/scanner/voucher-form";
 import { BulkUpload } from "@/components/scanner/bulk-upload";
-import { Layers } from "lucide-react";
+import { Layers, ScanLine, Camera } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CameraScanner } from "@/components/scanner/camera-scanner";
+import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export default function ScanPage() {
+  const [activeTab, setActiveTab] = useState<string>("single");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [ocr, setOcr] = useState<OcrResult | null>(null);
@@ -120,8 +124,11 @@ export default function ScanPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="single" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="h-11 rounded-full p-1">
+          <TabsTrigger value="camera" className="rounded-full px-5">
+            <Camera className="mr-2 h-4 w-4" /> Live Scanner
+          </TabsTrigger>
           <TabsTrigger value="single" className="rounded-full px-5">
             <ScanLine className="mr-2 h-4 w-4" /> Single voucher
           </TabsTrigger>
@@ -130,7 +137,91 @@ export default function ScanPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="single" className="space-y-6">
+        <TabsContent
+          value="camera"
+          forceMount
+          className={cn("space-y-6", activeTab !== "camera" && "hidden")}
+        >
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card className="card-premium border-border/60">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Camera className="h-4 w-4" /> 1. Live camera viewfinder
+                </CardTitle>
+                <CardDescription>
+                  Point camera at the physical fuel voucher stub and snap photo to auto-extract fields.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {previewUrl ? (
+                  <div className="space-y-4">
+                    <div className="relative overflow-hidden rounded-lg border bg-muted">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={previewUrl}
+                        alt="Scanned voucher preview"
+                        className="mx-auto max-h-72 w-auto object-contain"
+                      />
+                      {progress != null && (
+                        <div className="absolute inset-x-0 bottom-0 space-y-1 bg-background/90 p-3">
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Running AI extraction…</span>
+                            <span>{progress}%</span>
+                          </div>
+                          <Progress value={progress} />
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleClear}
+                      className="w-full h-11 rounded-xl gap-2 font-medium border-border/80 hover:border-primary/50"
+                    >
+                      <Camera className="h-4 w-4 text-primary" />
+                      Scan Another Voucher
+                    </Button>
+                  </div>
+                ) : (
+                  <CameraScanner
+                    onCapture={handleFile}
+                    onCancel={() => setActiveTab("single")}
+                    disabled={busy}
+                  />
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="card-premium border-border/60">
+              <CardHeader>
+                <CardTitle className="text-base">2. Verify &amp; save</CardTitle>
+                <CardDescription>
+                  Correct any misread values, then save to the fuel log.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <VoucherForm ocr={ocr} imageUrl={previewUrl} onSubmit={handleClear} />
+                {ocr && (
+                  <>
+                    <Separator className="my-4" />
+                    <details className="text-xs text-muted-foreground">
+                      <summary className="cursor-pointer select-none">Raw OCR text</summary>
+                      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
+                        {ocr.fullText || "(no text recognized)"}
+                      </pre>
+                    </details>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent
+          value="single"
+          forceMount
+          className={cn("space-y-6", activeTab !== "single" && "hidden")}
+        >
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="card-premium border-border/60">
           <CardHeader>
@@ -175,7 +266,11 @@ export default function ScanPage() {
       </div>
         </TabsContent>
 
-        <TabsContent value="bulk">
+        <TabsContent
+          value="bulk"
+          forceMount
+          className={cn(activeTab !== "bulk" && "hidden")}
+        >
           <Card className="card-premium border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">

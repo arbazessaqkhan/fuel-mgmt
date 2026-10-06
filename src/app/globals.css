@@ -136,3 +136,14 @@
   backdrop-filter: blur(12px) saturate(1.4);
   -webkit-backdrop-filter: blur(12px) saturate(1.4);
 }
+
+/* Voucher scanner laser animation */
+@keyframes scanner-laser {
+  0% { top: 6%; opacity: 0.6; }
+  50% { top: 92%; opacity: 0.95; }
+  100% { top: 6%; opacity: 0.6; }
+}
+
+.animate-scanline {
+  animation: scanner-laser 2.4s ease-in-out infinite;
+}

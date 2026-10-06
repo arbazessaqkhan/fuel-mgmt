@@ -3,9 +3,10 @@
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import { UploadCloud, FileImage, X } from "lucide-react";
+import { UploadCloud, FileImage, X, Camera } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
+import { CameraScanner } from "./camera-scanner";
 
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp"];
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -24,6 +25,7 @@ export function UploadZone({
   disabled?: boolean;
 }) {
   const [dragOver, setDragOver] = useState(false);
+  const [mode, setMode] = useState<"upload" | "camera">("upload");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validate = useCallback(
@@ -89,50 +91,84 @@ export function UploadZone({
             size="icon"
             variant="secondary"
             className="absolute right-2 top-2"
-            onClick={onClear}
+            onClick={() => {
+              setMode("upload");
+              onClear();
+            }}
             disabled={disabled || progress != null}
             aria-label="Remove image"
           >
             <X className="h-4 w-4" />
           </Button>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
+      ) : mode === "camera" ? (
+        <CameraScanner
+          onCapture={(file) => {
+            setMode("upload");
+            onFileSelected(file);
           }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            handleFiles(e.dataTransfer.files);
-          }}
+          onCancel={() => setMode("upload")}
           disabled={disabled}
-          className={cn(
-            "flex w-full flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-10 text-center transition-colors",
-            dragOver
-              ? "border-primary bg-primary/5"
-              : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/40",
-            disabled && "cursor-not-allowed opacity-60"
-          )}
-        >
-          {progress != null ? (
-            <FileImage className="h-10 w-10 text-muted-foreground" />
-          ) : (
-            <UploadCloud className="h-10 w-10 text-muted-foreground" />
-          )}
-          <div>
-            <p className="font-medium">
-              {progress != null ? "Processing image…" : "Drag & drop voucher image here"}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              or click to browse — JPG, PNG or WebP, up to 10 MB
-            </p>
+        />
+      ) : (
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              handleFiles(e.dataTransfer.files);
+            }}
+            disabled={disabled}
+            className={cn(
+              "flex w-full flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors",
+              dragOver
+                ? "border-primary bg-primary/5"
+                : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/40",
+              disabled && "cursor-not-allowed opacity-60"
+            )}
+          >
+            {progress != null ? (
+              <FileImage className="h-10 w-10 text-muted-foreground" />
+            ) : (
+              <UploadCloud className="h-10 w-10 text-muted-foreground" />
+            )}
+            <div>
+              <p className="font-medium">
+                {progress != null ? "Processing image…" : "Drag & drop voucher image here"}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                or click to browse — JPG, PNG or WebP, up to 10 MB
+              </p>
+            </div>
+          </button>
+
+          <div className="relative flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border/70" />
+            </div>
+            <span className="relative bg-card px-2 text-xs uppercase text-muted-foreground font-semibold">
+              Or
+            </span>
           </div>
-        </button>
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setMode("camera")}
+            disabled={disabled}
+            className="w-full h-11 rounded-xl border-border/80 hover:border-primary/50 hover:bg-primary/5 text-sm font-medium gap-2 transition-colors"
+          >
+            <Camera className="h-4 w-4 text-primary" />
+            Scan with Live Camera
+          </Button>
+        </div>
       )}
     </div>
   );
