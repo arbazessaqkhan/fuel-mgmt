@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session-edge";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login"];
+const PUBLIC_PATHS = ["/login", "/api/auth/login", "/manifest.json", "/sw.js"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -34,6 +34,6 @@ export async function middleware(req: NextRequest) {
 export const config = {
   // Protect pages + APIs; skip Next internals and static assets.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|eng.traineddata|.*\\.(?:svg|ico|png|jpg|jpeg|webp|css|js|map|woff|woff2|txt|gz)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|eng.traineddata|.*\\.(?:svg|ico|png|jpg|jpeg|webp|css|js|json|map|woff|woff2|txt|gz)$).*)",
   ],
 };

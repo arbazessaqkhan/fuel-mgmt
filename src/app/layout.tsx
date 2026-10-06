@@ -59,6 +59,11 @@ export default function RootLayout({
           </main>
           <Toaster richColors position="bottom-right" />
         </ThemeProvider>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}`,
+          }}
+        />
       </body>
     </html>
   );
