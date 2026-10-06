@@ -147,3 +147,20 @@
 .animate-scanline {
   animation: scanner-laser 2.4s ease-in-out infinite;
 }
+
+/* Global mobile overflow protection */
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* Hide scrollbars for clean horizontal scrolling */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+

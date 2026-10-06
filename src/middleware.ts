@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session-edge";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/manifest.json", "/sw.js"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/auth/login",
+  "/manifest.json",
+  "/sw.js",
+  "/.well-known",
+];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

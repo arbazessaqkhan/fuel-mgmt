@@ -3,6 +3,8 @@
   "short_name": "FuelLog",
   "description": "Scan fuel vouchers, track vehicle consumption, and manage fleet fuel logs.",
   "start_url": "/",
+  "scope": "/",
+  "id": "/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#2563eb",

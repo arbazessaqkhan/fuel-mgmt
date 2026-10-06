@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.vercel.fuel_mgmt_xi.twa",
+      "sha256_cert_fingerprints": [
+        "5F:05:CF:F1:54:E2:76:E5:D3:7B:6D:D7:B7:AC:02:05:30:51:9A:F2:B0:5A:2B:C7:5E:F5:28:F9:3E:67:EC:96"
+      ]
+    }
+  }
+]

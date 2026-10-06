@@ -183,8 +183,8 @@ export function CameraScanner({
         className
       )}
     >
-      {/* Video Viewport Container */}
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-black sm:aspect-[16/11]">
+      {/* Video Viewport Container: generous portrait height so users do not need to pull phone high */}
+      <div className="relative h-[55vh] min-h-[460px] max-h-[640px] w-full overflow-hidden bg-black sm:min-h-[500px]">
         {/* Live video */}
         <video
           ref={videoRef}
@@ -200,8 +200,8 @@ export function CameraScanner({
 
         {/* Viewfinder Overlay / Voucher Target Frame */}
         {!starting && !error && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-            <div className="relative h-4/5 w-11/12 max-w-lg rounded-xl border border-white/30 bg-white/[0.02] shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-3 sm:p-6">
+            <div className="relative h-[86%] w-[92%] max-w-sm sm:max-w-lg rounded-xl border border-white/30 bg-white/[0.02] shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]">
               {/* Corner Reticles */}
               <div className="absolute -left-1 -top-1 h-6 w-6 border-l-4 border-t-4 border-primary rounded-tl-sm" />
               <div className="absolute -right-1 -top-1 h-6 w-6 border-r-4 border-t-4 border-primary rounded-tr-sm" />
@@ -306,8 +306,8 @@ export function CameraScanner({
       </div>
 
       {/* Bottom Shutter & Action Bar */}
-      <div className="flex items-center justify-between bg-neutral-900/90 px-6 py-4 backdrop-blur-md border-t border-white/10">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-1 bg-neutral-900/90 px-3 py-3 sm:px-6 sm:py-4 backdrop-blur-md border-t border-white/10">
+        <div className="flex items-center min-w-0">
           {onCancel && (
             <Button
               type="button"
@@ -317,42 +317,46 @@ export function CameraScanner({
                 stopStream();
                 onCancel();
               }}
-              className="text-xs text-neutral-300 hover:text-white hover:bg-white/10"
+              className="text-[11px] sm:text-xs text-neutral-300 hover:text-white hover:bg-white/10 px-2 sm:px-3 h-8 sm:h-9"
             >
-              <Upload className="mr-1.5 h-3.5 w-3.5" /> Upload File Instead
+              <Upload className="mr-1 h-3 w-3 sm:mr-1.5 sm:h-3.5 sm:w-3.5" />
+              <span className="hidden sm:inline">Upload File</span>
+              <span className="sm:hidden">Upload</span>
             </Button>
           )}
         </div>
 
         {/* Capture / Shutter Button */}
-        <div className="flex items-center justify-center">
+        <div className="flex items-center justify-center shrink-0">
           <button
             type="button"
             onClick={handleCapture}
             disabled={starting || Boolean(error) || capturing || disabled}
             aria-label="Capture voucher photo"
             className={cn(
-              "group relative flex h-16 w-16 items-center justify-center rounded-full border-4 border-white/90 bg-primary shadow-lg transition-all active:scale-95 disabled:pointer-events-none disabled:opacity-50",
+              "group relative flex h-14 w-14 sm:h-16 sm:w-16 items-center justify-center rounded-full border-4 border-white/90 bg-primary shadow-lg transition-all active:scale-95 disabled:pointer-events-none disabled:opacity-50",
               capturing ? "animate-pulse scale-95" : "hover:scale-105 hover:bg-primary/90"
             )}
           >
-            <div className="h-11 w-11 rounded-full bg-white transition-transform group-hover:scale-95 flex items-center justify-center text-primary shadow-inner">
-              <Camera className="h-5 w-5" />
+            <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-full bg-white transition-transform group-hover:scale-95 flex items-center justify-center text-primary shadow-inner">
+              <Camera className="h-4 w-4 sm:h-5 sm:w-5" />
             </div>
           </button>
         </div>
 
         {/* Quick mobile snapshot button */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center min-w-0">
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={() => fallbackInputRef.current?.click()}
-            className="text-xs text-neutral-300 hover:text-white hover:bg-white/10"
+            className="text-[11px] sm:text-xs text-neutral-300 hover:text-white hover:bg-white/10 px-2 sm:px-3 h-8 sm:h-9"
             title="Snap with phone camera"
           >
-            <Camera className="mr-1.5 h-3.5 w-3.5" /> Snap Photo
+            <Camera className="mr-1 h-3 w-3 sm:mr-1.5 sm:h-3.5 sm:w-3.5" />
+            <span className="hidden sm:inline">Snap Photo</span>
+            <span className="sm:hidden">Photo</span>
           </Button>
         </div>
       </div>

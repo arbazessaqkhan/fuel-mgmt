@@ -94,7 +94,7 @@ export function SiteHeader() {
           </span>
           <span className="leading-tight">
             <span className="block text-[15px] font-semibold tracking-tight">FuelLog</span>
-            <span className="block text-[11px] font-medium text-muted-foreground">
+            <span className="block text-[11px] font-medium text-muted-foreground hidden sm:block">
               Fleet Manager
             </span>
           </span>
@@ -106,13 +106,13 @@ export function SiteHeader() {
             className="ml-1 hidden h-9 w-auto sm:block dark:rounded-md dark:bg-white/90 dark:p-1"
           />
         </Link>
-        <nav className="flex min-w-0 items-center gap-1 overflow-x-auto text-sm">
+        <nav className="flex min-w-0 items-center gap-1 overflow-x-auto text-sm no-scrollbar">
           {links.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
               className={cn(
-                "rounded-full px-3.5 py-1.5 font-medium transition-colors sm:px-4",
+                "rounded-full px-2.5 py-1 text-xs sm:px-4 sm:py-1.5 sm:text-sm font-medium transition-colors whitespace-nowrap",
                 isActive(href)
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"

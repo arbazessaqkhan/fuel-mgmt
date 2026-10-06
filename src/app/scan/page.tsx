@@ -125,17 +125,28 @@ export default function ScanPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="h-11 rounded-full p-1">
-          <TabsTrigger value="camera" className="rounded-full px-5">
-            <Camera className="mr-2 h-4 w-4" /> Live Scanner
-          </TabsTrigger>
-          <TabsTrigger value="single" className="rounded-full px-5">
-            <ScanLine className="mr-2 h-4 w-4" /> Single voucher
-          </TabsTrigger>
-          <TabsTrigger value="bulk" className="rounded-full px-5">
-            <Layers className="mr-2 h-4 w-4" /> Bulk upload (PDF)
-          </TabsTrigger>
-        </TabsList>
+        <div className="w-full max-w-full overflow-x-auto no-scrollbar pb-1">
+          <TabsList className="inline-flex h-11 w-max min-w-full items-center justify-start rounded-full bg-muted/90 p-1 border border-border/60 text-muted-foreground shadow-xs">
+            <TabsTrigger
+              value="camera"
+              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium whitespace-nowrap transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+            >
+              <Camera className="mr-1.5 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4" /> Live Scanner
+            </TabsTrigger>
+            <TabsTrigger
+              value="single"
+              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium whitespace-nowrap transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+            >
+              <ScanLine className="mr-1.5 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4" /> Single voucher
+            </TabsTrigger>
+            <TabsTrigger
+              value="bulk"
+              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium whitespace-nowrap transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+            >
+              <Layers className="mr-1.5 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4" /> Bulk upload (PDF)
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent
           value="camera"

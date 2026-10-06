@@ -127,7 +127,7 @@ export function UploadZone({
             }}
             disabled={disabled}
             className={cn(
-              "flex w-full flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 text-center transition-colors",
+              "flex w-full flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-4 sm:p-8 text-center transition-colors",
               dragOver
                 ? "border-primary bg-primary/5"
                 : "border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/40",
