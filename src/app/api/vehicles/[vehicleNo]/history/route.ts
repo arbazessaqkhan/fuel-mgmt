@@ -124,8 +124,60 @@ export async function GET(
       ])
     );
 
-    // Bucket by YYYY-MM — ONLY months with actual data are included, so the
-    // chart/table show active months without zero-fill padding.
+    // Fuel type breakdown
+    let dieselLiters = 0;
+    let petrolLiters = 0;
+    for (const v of vouchers) {
+      if (v.fuelType === "Petrol") {
+        petrolLiters += v.liters;
+      } else {
+        dieselLiters += v.liters;
+      }
+    }
+
+    const primaryFuelType =
+      petrolLiters > 0 && dieselLiters > 0
+        ? "Diesel & Petrol"
+        : petrolLiters > 0
+        ? "Petrol"
+        : "Diesel";
+
+    // Date-wise breakdown (day precision) for date-specific charts and logs
+    const byDay = new Map<string, { liters: number; vouchers: number; dieselLiters: number; petrolLiters: number }>();
+    for (const v of vouchers) {
+      const dayKey = new Date(v.date).toISOString().slice(0, 10);
+      const bucket = byDay.get(dayKey);
+      if (bucket) {
+        bucket.liters += v.liters;
+        bucket.vouchers += 1;
+        if (v.fuelType === "Petrol") bucket.petrolLiters += v.liters;
+        else bucket.dieselLiters += v.liters;
+      } else {
+        byDay.set(dayKey, {
+          liters: v.liters,
+          vouchers: 1,
+          dieselLiters: v.fuelType === "Petrol" ? 0 : v.liters,
+          petrolLiters: v.fuelType === "Petrol" ? v.liters : 0,
+        });
+      }
+    }
+
+    const dailyRows = Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, b]) => {
+        const [y, m, day] = date.split("-").map(Number);
+        const d = new Date(Date.UTC(y, m - 1, day));
+        return {
+          date,
+          label: d.toLocaleDateString("en-US", { day: "numeric", month: "short", timeZone: "UTC" }),
+          fullDate: d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }),
+          liters: Math.round(b.liters * 100) / 100,
+          vouchers: b.vouchers,
+          fuelType: b.dieselLiters > 0 && b.petrolLiters > 0 ? "Diesel & Petrol" : b.petrolLiters > 0 ? "Petrol" : "Diesel",
+        };
+      });
+
+    // Bucket by YYYY-MM
     const byMonth = new Map<string, { liters: number; vouchers: number }>();
     for (const v of vouchers) {
       const key = monthKey(new Date(v.date));
@@ -155,8 +207,23 @@ export async function GET(
       toMonth: toMonthKey,
       availableMonths,
       totalLiters: Math.round(totalLiters * 100) / 100,
+      dieselLiters: Math.round(dieselLiters * 100) / 100,
+      petrolLiters: Math.round(petrolLiters * 100) / 100,
+      primaryFuelType,
       totalVouchers,
       months: monthRows,
+      daily: dailyRows,
+      vouchers: vouchers
+        .map((v) => ({
+          id: v.id,
+          voucherNo: v.voucherNo,
+          vehicleNo: v.vehicleNo,
+          liters: v.liters,
+          fuelType: v.fuelType || "Diesel",
+          date: v.date,
+          imageUrl: v.imageUrl,
+        }))
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
       recent,
     });
     res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");

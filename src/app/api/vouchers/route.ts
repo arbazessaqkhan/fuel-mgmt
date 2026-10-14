@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     const sortField = sp.get("sortField") ?? "date";
     const sortDir = sp.get("sortDir") === "asc" ? "asc" : "desc";
     const page = Math.max(1, Number(sp.get("page") ?? 1) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number(sp.get("pageSize") ?? 25) || 25));
+    const pageSize = Math.min(100, Math.max(1, Number(sp.get("pageSize") ?? 10) || 10));
 
     const range = monthRange(year, month);
 
@@ -45,11 +45,16 @@ export async function GET(req: NextRequest) {
       ? (sortField as (typeof sortable)[number])
       : "date";
 
+    const orderBy: Prisma.FuelVoucherOrderByWithRelationInput[] =
+      field === "date"
+        ? [{ date: sortDir }, { createdAt: sortDir }]
+        : [{ [field]: sortDir }, { date: "desc" }];
+
     const [items, total] = await withDbRetry(() =>
       Promise.all([
         prisma.fuelVoucher.findMany({
           where,
-          orderBy: { [field]: sortDir },
+          orderBy,
           skip: (page - 1) * pageSize,
           take: pageSize,
         }),

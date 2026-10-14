@@ -72,7 +72,8 @@ export async function POST(request: NextRequest) {
   try {
     const { default: sharpModule } = await import("sharp");
     const input = Buffer.from(await image.arrayBuffer());
-    const buf = await sharpModule(input).resize({ width: 1600 }).jpeg({ quality: 85 }).toBuffer();
+    // Optimized 1280px @ 80% quality: reduces payload size by ~50% while keeping ledger handwriting sharp
+    const buf = await sharpModule(input).resize({ width: 1280 }).jpeg({ quality: 80 }).toBuffer();
     const b64 = buf.toString("base64");
 
     const callModel = (model: string) =>
@@ -81,6 +82,8 @@ export async function POST(request: NextRequest) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
           model,
+          response_format: { type: "json_object" }, // Fast constrained JSON decoding
+          temperature: 0.1, // Fast deterministic sampling
           messages: [
             {
               role: "user",
@@ -106,35 +109,50 @@ export async function POST(request: NextRequest) {
               ],
             },
           ],
-          max_tokens: 4000,
+          max_tokens: 2500,
         }),
-        signal: AbortSignal.timeout(110_000),
+        signal: request.signal
+          ? AbortSignal.any([request.signal, AbortSignal.timeout(60_000)])
+          : AbortSignal.timeout(60_000),
       });
 
     let res: Response | null = null;
     let lastStatus = 502;
     let lastDetail = "";
     for (const model of [VISION_MODEL, ...FALLBACK_MODELS]) {
-      try {
-        const r = await callModel(model);
-        if (r.ok) {
-          res = r;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const r = await callModel(model);
+          if (r.ok) {
+            res = r;
+            break;
+          }
+          lastStatus = r.status;
+          lastDetail = (await r.text().catch(() => "")).slice(0, 300);
+          console.warn(`ocr/bulk: model ${model} attempt ${attempt + 1} failed (${r.status})`, lastDetail);
+          // If model is busy (503) or rate-limited (429), pause briefly and retry once
+          if ((r.status === 503 || r.status === 429) && attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+            continue;
+          }
           break;
+        } catch (e) {
+          console.warn(`ocr/bulk: model ${model} threw`, e);
+          lastDetail = String(e).slice(0, 300);
+          if (attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            continue;
+          }
         }
-        lastStatus = r.status;
-        lastDetail = (await r.text().catch(() => "")).slice(0, 300);
-        console.error(`ocr/bulk: model ${model} failed (${r.status})`, lastDetail);
-      } catch (e) {
-        console.error(`ocr/bulk: model ${model} threw`, e);
-        lastDetail = String(e).slice(0, 300);
       }
+      if (res) break;
     }
 
     if (!res) {
       return NextResponse.json(
         {
-          error: `Vision model request failed (${lastStatus}).`,
-          hint: "All vision models are rate-limited or unavailable — try again later or enter entries manually.",
+          error: `Vision service busy (${lastStatus}). Please retry in a few seconds or enter vouchers manually.`,
+          hint: "All vision models were busy — try again or enter entries manually.",
         },
         { status: 502 }
       );

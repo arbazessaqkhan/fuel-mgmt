@@ -27,7 +27,14 @@ export async function GET(req: NextRequest) {
 
     let where = { date: { gte: start, lt: end } };
 
-    let [totalAgg, perVehicle] = await withDbRetry(() =>
+    let [
+      totalAgg,
+      perVehicle,
+      overallAgg,
+      fuelTypeAgg,
+      uniqueVehicles,
+      overallTopVehicle,
+    ] = await withDbRetry(() =>
       Promise.all([
         prisma.fuelVoucher.aggregate({
           _sum: { liters: true },
@@ -40,6 +47,25 @@ export async function GET(req: NextRequest) {
           _sum: { liters: true },
           _count: { _all: true },
           orderBy: { _sum: { liters: "desc" } },
+        }),
+        prisma.fuelVoucher.aggregate({
+          _sum: { liters: true },
+          _count: { _all: true },
+        }),
+        prisma.fuelVoucher.groupBy({
+          by: ["fuelType"],
+          _sum: { liters: true },
+          _count: { _all: true },
+        }),
+        prisma.fuelVoucher.groupBy({
+          by: ["vehicleNo"],
+        }),
+        prisma.fuelVoucher.groupBy({
+          by: ["vehicleNo"],
+          _sum: { liters: true },
+          _count: { _all: true },
+          orderBy: { _sum: { liters: "desc" } },
+          take: 1,
         }),
       ])
     );
@@ -80,6 +106,18 @@ export async function GET(req: NextRequest) {
       vouchers: v._count._all,
     }));
 
+    let overallDieselLiters = 0;
+    let overallPetrolLiters = 0;
+    for (const item of fuelTypeAgg) {
+      const type = (item.fuelType ?? "").toLowerCase();
+      const liters = item._sum.liters ?? 0;
+      if (type === "petrol") {
+        overallPetrolLiters += liters;
+      } else {
+        overallDieselLiters += liters;
+      }
+    }
+
     const result = {
       year: start.getUTCFullYear(),
       month: start.getUTCMonth() + 1,
@@ -90,6 +128,14 @@ export async function GET(req: NextRequest) {
       voucherCount: totalAgg._count._all ?? 0,
       mostActiveVehicle: vehicleBreakdown[0]?.vehicleNo ?? null,
       vehicleBreakdown,
+      // Overall lifetime stats across all vouchers
+      overallTotalLiters: overallAgg._sum.liters ?? 0,
+      overallDieselLiters,
+      overallPetrolLiters,
+      overallVoucherCount: overallAgg._count._all ?? 0,
+      totalVehiclesCount: uniqueVehicles.length,
+      overallMostActiveVehicle:
+        overallTopVehicle[0]?.vehicleNo ?? vehicleBreakdown[0]?.vehicleNo ?? null,
     };
 
     const res = NextResponse.json(result);

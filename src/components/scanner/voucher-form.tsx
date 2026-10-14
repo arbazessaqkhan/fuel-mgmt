@@ -12,10 +12,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { OcrResult } from "@/lib/ocr/types";
-import { AlertTriangle, Loader2, PencilLine, Save } from "lucide-react";
+import { AlertTriangle, Loader2, PencilLine, Save, RotateCcw } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { compressImage } from "@/lib/image-compress";
+import { useQueryClient } from "@tanstack/react-query";
 
 export interface VoucherFormValues {
   voucherNo: string;
@@ -60,15 +61,27 @@ export function VoucherForm({
   ocr,
   imageUrl,
   onSubmit,
+  onCancel,
 }: {
   ocr: OcrResult | null;
   imageUrl?: string | null;
   onSubmit: () => void; // called after a successful save; parent resets
+  onCancel?: () => void; // called to cancel or reset everything
 }) {
+  const queryClient = useQueryClient();
   const [values, setValues] = useState<VoucherFormValues>(EMPTY);
   const [errors, setErrors] = useState<Partial<Record<keyof VoucherFormValues, string>>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const handleReset = () => {
+    setValues({ ...EMPTY, date: todayIso() });
+    setPrefilledFor(null);
+    setErrors({});
+    setFormError(null);
+    onCancel?.();
+    toast.info("Form reset. You can enter a new voucher or scan again.");
+  };
 
   // Background pre-upload: compress & upload image to B2 immediately while user reviews fields
   const [preUploadedUrl, setPreUploadedUrl] = useState<string | null>(null);
@@ -190,13 +203,19 @@ export function VoucherForm({
         toast.success("Voucher saved", {
           description: `${values.voucherNo} · ${values.vehicleNo} · ${values.liters} L`,
         });
-        // Invalidate dashboard caches so fresh data displays immediately
+        // Invalidate and purge cached queries so fresh data is automatically fetched
+        queryClient.invalidateQueries({ queryKey: ["vouchers"] });
+        queryClient.invalidateQueries({ queryKey: ["stats"] });
+        queryClient.invalidateQueries({ queryKey: ["vehicle"] });
+        queryClient.removeQueries({ queryKey: ["vouchers"] });
+        queryClient.removeQueries({ queryKey: ["stats"] });
         try {
+          window.localStorage.removeItem("FUELLOG_QUERY_CACHE_V1");
           sessionStorage.removeItem("fuellog_cached_stats");
           sessionStorage.removeItem("fuellog_cached_vouchers");
           sessionStorage.removeItem("fuellog_cached_total");
         } catch {
-          // sessionStorage may not be accessible in all contexts
+          // storage may not be accessible in all contexts
         }
         // Clear all inputs so the next voucher can be entered immediately.
         setValues({ ...EMPTY, date: todayIso() });
@@ -441,10 +460,22 @@ export function VoucherForm({
         </div>
       </div>
 
-      <Button type="submit" disabled={saving} className="w-full sm:w-auto">
-        {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-        {saving ? "Saving…" : "Save voucher"}
-      </Button>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" disabled={saving} className="flex-1 sm:flex-initial min-w-[140px]">
+          {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+          {saving ? "Saving…" : "Save voucher"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={saving}
+          onClick={handleReset}
+          className="border-border/80 hover:bg-muted text-muted-foreground hover:text-foreground text-xs sm:text-sm gap-1.5"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Cancel &amp; Reset Form
+        </Button>
+      </div>
     </form>
   );
 }

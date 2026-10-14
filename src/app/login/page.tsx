@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    // If restored from browser back-forward cache (bfcache), force a reload
+    // so server middleware can redirect already-authenticated users.
+    function handlePageShow(e: PageTransitionEvent) {
+      if (e.persisted) {
+        window.location.reload();
+      }
+    }
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -31,11 +43,15 @@ export default function LoginPage() {
         return;
       }
       // A hard navigation guarantees the fresh session cookie is sent with
-      // the first authenticated page request (soft RSC navigations from the
-      // login page can race the Set-Cookie). Pause briefly so the welcome
-      // toast is visible before the page swaps.
+      // the first authenticated page request. Using replace() ensures /login
+      // does not remain in the browser back-history stack.
       toast.success("Signed in", { description: "Welcome back to FuelLog Fleet Manager." });
-      setTimeout(() => { window.location.href = "/"; }, 700);
+      setTimeout(() => {
+        const params = new URLSearchParams(window.location.search);
+        const from = params.get("from");
+        const dest = from && from.startsWith("/") && !from.startsWith("//") ? from : "/";
+        window.location.replace(dest);
+      }, 700);
     } catch {
       setError("Network error. Please try again.");
     } finally {

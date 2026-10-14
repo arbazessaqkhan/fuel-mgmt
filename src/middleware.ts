@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session-edge";
 
+// Paths that never require authentication and never redirect authenticated users.
 const PUBLIC_PATHS = [
-  "/login",
   "/api/auth/login",
   "/manifest.json",
   "/sw.js",
@@ -12,7 +12,7 @@ const PUBLIC_PATHS = [
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Allow public paths
+  // Allow unconditional public paths (APIs, static manifests, etc.)
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
     return NextResponse.next();
   }
@@ -20,18 +20,24 @@ export async function middleware(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const session = await verifySessionToken(token);
   const isApi = pathname.startsWith("/api");
+  const isLogin = pathname === "/login" || pathname.startsWith("/login/");
 
   if (!session) {
     if (isApi) {
       return NextResponse.json({ error: "Unauthorized. Please log in." }, { status: 401 });
+    }
+    if (isLogin) {
+      return NextResponse.next();
     }
     const loginUrl = new URL("/login", req.url);
     loginUrl.searchParams.set("from", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (pathname === "/login") {
-    return NextResponse.redirect(new URL("/", req.url));
+  if (isLogin) {
+    const from = req.nextUrl.searchParams.get("from");
+    const dest = from && from.startsWith("/") && !from.startsWith("//") ? from : "/";
+    return NextResponse.redirect(new URL(dest, req.url));
   }
 
   return NextResponse.next();

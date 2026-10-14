@@ -2,16 +2,25 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, CalendarRange, Droplets, FileSpreadsheet, FileText, Gauge, Loader2, TrendingUp } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarRange,
+  Droplets,
+  FileSpreadsheet,
+  FileText,
+  Fuel,
+  Gauge,
+  Loader2,
+  TrendingUp,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -27,37 +36,37 @@ interface HistoryData {
   toMonth: string;
   availableMonths: string[];
   totalLiters: number;
+  dieselLiters?: number;
+  petrolLiters?: number;
+  primaryFuelType?: string;
   totalVouchers: number;
   months: Array<{ month: string; liters: number; vouchers: number }>;
+  daily?: Array<{
+    date: string;
+    label: string;
+    fullDate: string;
+    liters: number;
+    vouchers: number;
+    fuelType: string;
+  }>;
+  vouchers?: Array<{
+    id: string;
+    voucherNo: string;
+    vehicleNo: string;
+    liters: number;
+    fuelType: string;
+    date: string;
+    imageUrl?: string | null;
+  }>;
   recent: Array<{
     id: string;
     voucherNo: string;
     liters: number;
+    fuelType?: string;
     date: string;
     imageUrl?: string | null;
   }>;
 }
-
-function monthOptions(available: string[]) {
-  // Group YYYY-MM by year: [{ year: 2026, months: [{value, label}] }]
-  const byYear = new Map<number, Array<{ value: string; label: string }>>();
-  for (const key of available) {
-    const [y, m] = key.split("-").map(Number);
-    if (!byYear.has(y)) byYear.set(y, []);
-    byYear.get(y)!.push({
-      value: key,
-      label: new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", {
-        month: "long",
-        timeZone: "UTC",
-      }),
-    });
-  }
-  return Array.from(byYear.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([year, months]) => ({ year, months }));
-}
-
-const WINDOW_OPTIONS = [6, 12, 24];
 
 const fmt = (n: number, digits = 2) =>
   new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(n);
@@ -97,7 +106,9 @@ function endOfMonthIso(monthKey: string): string {
 }
 
 function monthLabel(key: string) {
+  if (!key) return "";
   const [y, m] = key.split("-").map(Number);
+  if (!y || !m) return key;
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", {
     month: "short",
     year: "2-digit",
@@ -105,18 +116,39 @@ function monthLabel(key: string) {
   });
 }
 
-function shortPlate(key: string) {
-  const [y, m] = key.split("-").map(Number);
-  return `${new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })} ${String(y).slice(2)}`;
+function formatDisplayDate(iso: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
-function HistoryTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ payload: { liters: number; vouchers: number; fullMonth: string } }>; label?: string }) {
+function HistoryTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{
+    payload: {
+      liters: number;
+      vouchers: number;
+      fullDate?: string;
+      label?: string;
+      fuelType?: string;
+    };
+  }>;
+}) {
   if (!active || !payload?.length) return null;
   const row = payload[0].payload;
   return (
     <div className="rounded-xl border bg-popover px-3.5 py-2.5 text-popover-foreground shadow-lg">
-      <p className="text-sm font-semibold">{row.fullMonth}</p>
-      <dl className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
+      <p className="text-sm font-semibold">{row.fullDate || row.label}</p>
+      <dl className="mt-1.5 space-y-1 text-xs text-muted-foreground">
         <div className="flex justify-between gap-6">
           <dt>Liters</dt>
           <dd className="font-medium tabular-nums text-foreground">{fmt(row.liters)} L</dd>
@@ -125,23 +157,52 @@ function HistoryTooltip({ active, payload, label }: { active?: boolean; payload?
           <dt>Vouchers</dt>
           <dd className="font-medium tabular-nums text-foreground">{row.vouchers}</dd>
         </div>
+        {row.fuelType && (
+          <div className="flex justify-between gap-6">
+            <dt>Type</dt>
+            <dd className="font-medium text-foreground">{row.fuelType}</dd>
+          </div>
+        )}
       </dl>
     </div>
   );
 }
 
 export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
-  // Custom date range (day precision): start + end date inputs, presets.
   const [range, setRange] = useState<{ from: string | null; to: string | null }>({
     from: null,
     to: null,
   });
-  const [data, setData] = useState<HistoryData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+
+  // Cached Vehicle History Query
+  const {
+    data,
+    isLoading,
+    error: queryError,
+  } = useQuery<HistoryData | null>({
+    queryKey: ["vehicle", vehicleNo, { from: range.from, to: range.to }],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (range.from && range.to) {
+        params.set("from", range.from);
+        params.set("to", range.to);
+      }
+      const res = await fetch(
+        `/api/vehicles/${encodeURIComponent(vehicleNo)}/history?${params}`
+      );
+      if (res.status === 404) {
+        return null;
+      }
+      if (!res.ok) throw new Error("Could not load vehicle history.");
+      return res.json();
+    },
+  });
+
+  const notFound = !isLoading && data === null;
+  const loading = isLoading && !data;
+  const error = queryError ? (queryError as Error).message : null;
 
   const handleExport = async () => {
     setExporting(true);
@@ -166,55 +227,6 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
     }
   };
 
-  // Restore cached history for instant zero-skeleton rendering
-  useEffect(() => {
-    try {
-      const cached = sessionStorage.getItem(`fuellog_vehicle_${vehicleNo}`);
-      if (cached) {
-        setData(JSON.parse(cached));
-        setLoading(false);
-      }
-    } catch {}
-  }, [vehicleNo]);
-
-  const load = useCallback(
-    async (from: string | null, to: string | null) => {
-      // Only show skeleton if we don't already have data displayed or user filtered dates
-      if (from || to) {
-        setLoading(true);
-      }
-      setNotFound(false);
-      setError(null);
-      try {
-        const params = new URLSearchParams();
-        if (from && to) {
-          params.set("from", from);
-          params.set("to", to);
-        }
-        const res = await fetch(
-          `/api/vehicles/${encodeURIComponent(vehicleNo)}/history?${params}`
-        );
-        if (res.status === 404) {
-          setNotFound(true);
-          return;
-        }
-        if (!res.ok) throw new Error();
-        const json = await res.json();
-        setData(json);
-        if (!from && !to) {
-          try {
-            sessionStorage.setItem(`fuellog_vehicle_${vehicleNo}`, JSON.stringify(json));
-          } catch {}
-        }
-      } catch {
-        setError("Could not load vehicle history. Please refresh.");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [vehicleNo]
-  );
-
   const applyRange = useCallback(
     (from: string | null, to: string | null) => {
       if (from && to && from > to) {
@@ -227,21 +239,15 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
     []
   );
 
+  // Default to the vehicle's full available span on first load
   useEffect(() => {
-    load(range.from, range.to);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load, range]);
-
-  // After the first load, default to the vehicle's full data span.
-  useEffect(() => {
-    if (data && range.from === null && range.to === null && data.availableMonths.length > 0) {
+    if (data && range.from === null && range.to === null && data.availableMonths && data.availableMonths.length > 0) {
       setRange({
         from: `${data.availableMonths[0]}-01`,
         to: endOfMonthIso(data.availableMonths[data.availableMonths.length - 1]),
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [data, range.from, range.to]);
 
   if (notFound) {
     return (
@@ -257,55 +263,30 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
     );
   }
 
-  const best = data
-    ? data.months.reduce(
-        (bestRow, m) => (m.liters > bestRow.liters ? m : bestRow),
-        data.months[0] ?? { month: "—", liters: 0, vouchers: 0 }
-      )
-    : null;
   const avgPerFill =
-    data && data.totalVouchers > 0 ? data.totalLiters / data.totalVouchers : 0;
+    data && data.totalVouchers > 0
+      ? Math.round((data.totalLiters / data.totalVouchers) * 100) / 100
+      : 0;
 
-  const chartRows =
-    data?.months.map((m) => ({
-      ...m,
-      fullMonth: monthLabel(m.month),
-      label: shortPlate(m.month),
-    })) ?? [];
+  // Chart data: Date-wise daily points (if available) or monthly
+  const chartData =
+    data?.daily && data.daily.length > 0
+      ? data.daily
+      : data?.months.map((m) => ({
+          date: m.month,
+          label: monthLabel(m.month),
+          fullDate: monthLabel(m.month),
+          liters: m.liters,
+          vouchers: m.vouchers,
+          fuelType: data?.primaryFuelType || "Diesel",
+        })) ?? [];
 
-  const summaryCards = [
-    {
-      title: "Total Liters",
-      icon: Droplets,
-      value: data ? `${fmt(data.totalLiters)} L` : "—",
-      sub: data ? `${monthLabel(data.fromMonth)} – ${monthLabel(data.toMonth)}` : undefined,
-      accent: "from-blue-500/12 to-blue-500/4 text-blue-600 dark:text-blue-400",
-    },
-    {
-      title: "Total Vouchers",
-      icon: FileText,
-      value: data ? String(data.totalVouchers) : "—",
-      sub: data ? "fills recorded" : undefined,
-      accent: "from-emerald-500/12 to-emerald-500/4 text-emerald-600 dark:text-emerald-400",
-    },
-    {
-      title: "Avg per Fill",
-      icon: Gauge,
-      value: data ? `${fmt(avgPerFill)} L` : "—",
-      sub: data && data.totalVouchers > 0 ? "per voucher" : undefined,
-      accent: "from-violet-500/12 to-violet-500/4 text-violet-600 dark:text-violet-400",
-    },
-    {
-      title: "Best Month",
-      icon: TrendingUp,
-      value: best && best.liters > 0 ? `${fmt(best.liters)} L` : "—",
-      sub: best && best.liters > 0 ? monthLabel(best.month) : undefined,
-      accent: "from-amber-500/12 to-amber-500/4 text-amber-600 dark:text-amber-400",
-    },
-  ];
+  // Vouchers table: date-wise list of individual fills
+  const voucherList = data?.vouchers && data.vouchers.length > 0 ? data.vouchers : [];
 
   return (
     <div className="space-y-6">
+      {/* Header section with vehicle number, fuel type badge, and date range filters */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <Link
@@ -314,16 +295,32 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
           >
             <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
           </Link>
-          <h1 className="flex items-center gap-2.5 text-[26px] font-semibold leading-tight tracking-tight sm:text-3xl">
-            <span className="rounded-lg bg-gradient-to-br from-primary to-chart-2 px-2.5 py-1 text-base font-bold text-primary-foreground shadow-sm">
-              {vehicleNo}
-            </span>
-            <span className="sr-only sm:inline">vehicle history</span>
-          </h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-[26px] font-semibold leading-tight tracking-tight sm:text-3xl">
+              <span className="rounded-lg bg-gradient-to-br from-primary to-chart-2 px-3 py-1 text-lg font-bold text-primary-foreground shadow-xs">
+                {vehicleNo}
+              </span>
+            </h1>
+            {data?.primaryFuelType && (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
+                  data.primaryFuelType === "Petrol"
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                    : data.primaryFuelType === "Diesel"
+                    ? "bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/30"
+                    : "bg-purple-500/15 text-purple-700 dark:text-purple-400 border border-purple-500/30"
+                )}
+              >
+                {data.primaryFuelType}
+              </span>
+            )}
+          </div>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            Month-by-month fuel consumption over time.
+            Complete date-wise fuel consumption and voucher history.
           </p>
         </div>
+
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
           <div className="flex items-center gap-2">
             <div className="grid flex-1 gap-1 sm:w-44">
@@ -357,10 +354,18 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
           <div className="flex flex-wrap items-center gap-1.5 sm:mt-4">
             <PresetButton
               label="All time"
-              active={range.from === `${data?.availableMonths[0]}-01` && range.to === endOfMonthIso(data?.availableMonths[data.availableMonths.length - 1] ?? "")}
+              active={
+                Boolean(data?.availableMonths?.length) &&
+                range.from === `${data?.availableMonths[0]}-01` &&
+                range.to === endOfMonthIso(data?.availableMonths[data.availableMonths.length - 1] ?? "")
+              }
               onClick={() =>
                 data &&
-                applyRange(`${data.availableMonths[0]}-01`, endOfMonthIso(data.availableMonths[data.availableMonths.length - 1]))
+                data.availableMonths.length > 0 &&
+                applyRange(
+                  `${data.availableMonths[0]}-01`,
+                  endOfMonthIso(data.availableMonths[data.availableMonths.length - 1])
+                )
               }
             />
             <PresetButton
@@ -385,7 +390,7 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
               ) : (
                 <FileSpreadsheet className="h-4 w-4" />
               )}
-              {exporting ? "Generating..." : "Export Vehicle to Excel"}
+              {exporting ? "Generating..." : "Export to Excel"}
             </Button>
           </div>
         </div>
@@ -403,52 +408,144 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
         </div>
       )}
 
-      {/* Summary cards */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {summaryCards.map(({ title, icon: Icon, value, sub, accent }) => (
-          <Card key={title} className="card-premium border-border/60">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-              <CardTitle className="text-[13px] font-medium text-muted-foreground">{title}</CardTitle>
-              <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${accent}`}>
-                <Icon className="h-5 w-5" />
-              </span>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <Skeleton className="h-9 w-24" />
-              ) : (
-                <>
-                  <div className="truncate text-2xl font-semibold tracking-tight tabular-nums">{value}</div>
-                  {sub && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+      {/* Responsive metric cards: 2 per row on mobile, 4 on desktop (just like dashboard) */}
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-4">
+        {/* Card 1: Total Liters with Diesel & Petrol separation */}
+        <Card className="card-premium border-border/60 flex flex-col justify-between">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 sm:p-4 pb-1 sm:pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground truncate">
+              Total Fuel
+            </CardTitle>
+            <span className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-gradient-to-br from-blue-500/15 to-blue-500/5 text-blue-600 dark:text-blue-400">
+              <Droplets className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </span>
+          </CardHeader>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            {loading ? (
+              <Skeleton className="h-7 sm:h-8 w-24 sm:w-32" />
+            ) : (
+              <>
+                <div className="text-lg sm:text-2xl font-semibold tracking-tight tabular-nums">
+                  {data ? `${fmt(data.totalLiters)} L` : "—"}
+                </div>
+                <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground flex flex-wrap gap-x-1.5 font-medium">
+                  <span className="text-blue-600 dark:text-blue-400">
+                    Diesel: {data ? fmt(data.dieselLiters ?? 0) : "0"} L
+                  </span>
+                  <span>·</span>
+                  <span className="text-amber-600 dark:text-amber-400">
+                    Petrol: {data ? fmt(data.petrolLiters ?? 0) : "0"} L
+                  </span>
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Card 2: Total Vouchers */}
+        <Card className="card-premium border-border/60 flex flex-col justify-between">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 sm:p-4 pb-1 sm:pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground truncate">
+              Total Vouchers
+            </CardTitle>
+            <span className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-gradient-to-br from-emerald-500/15 to-emerald-500/5 text-emerald-600 dark:text-emerald-400">
+              <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </span>
+          </CardHeader>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            {loading ? (
+              <Skeleton className="h-7 sm:h-8 w-16 sm:w-20" />
+            ) : (
+              <>
+                <div className="text-lg sm:text-2xl font-semibold tracking-tight tabular-nums">
+                  {data ? String(data.totalVouchers) : "—"}
+                </div>
+                <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground">
+                  Fills recorded
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Card 3: Fuel Type */}
+        <Card className="card-premium border-border/60 flex flex-col justify-between">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 sm:p-4 pb-1 sm:pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground truncate">
+              Fuel Type
+            </CardTitle>
+            <span className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-gradient-to-br from-purple-500/15 to-purple-500/5 text-purple-600 dark:text-purple-400">
+              <Fuel className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </span>
+          </CardHeader>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            {loading ? (
+              <Skeleton className="h-7 sm:h-8 w-20 sm:w-24" />
+            ) : (
+              <>
+                <div className="text-lg sm:text-2xl font-semibold tracking-tight truncate">
+                  {data?.primaryFuelType || "Diesel"}
+                </div>
+                <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground">
+                  Engine specification
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Card 4: Average per Fill */}
+        <Card className="card-premium border-border/60 flex flex-col justify-between">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 sm:p-4 pb-1 sm:pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground truncate">
+              Avg per Fill
+            </CardTitle>
+            <span className="flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg sm:rounded-xl bg-gradient-to-br from-amber-500/15 to-amber-500/5 text-amber-600 dark:text-amber-400">
+              <Gauge className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </span>
+          </CardHeader>
+          <CardContent className="p-3 sm:p-4 pt-0">
+            {loading ? (
+              <Skeleton className="h-7 sm:h-8 w-20 sm:w-24" />
+            ) : (
+              <>
+                <div className="text-lg sm:text-2xl font-semibold tracking-tight tabular-nums">
+                  {data ? `${fmt(avgPerFill)} L` : "—"}
+                </div>
+                <p className="mt-1 text-[11px] sm:text-xs text-muted-foreground">
+                  Per voucher average
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Month-by-month chart + breakdown table */}
+      {/* Date-wise chart + date-wise breakdown table */}
       <Card className="card-premium border-border/60">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarRange className="h-4 w-4 text-primary" /> Liters per month
+            <CalendarRange className="h-4 w-4 text-primary" /> Fuel Fills (Date-Wise)
           </CardTitle>
           <CardDescription>
-            {data ? `${monthLabel(data.fromMonth)} – ${monthLabel(data.toMonth)}` : ""} — zero-activity months included.
+            {range.from && range.to
+              ? `${formatDisplayDate(range.from)} – ${formatDisplayDate(range.to)}`
+              : "Date-wise fuel consumption timeline"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {loading ? (
             <Skeleton className="h-72 w-full" />
-          ) : chartRows.length === 0 ? (
+          ) : chartData.length === 0 ? (
             <div className="flex h-72 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
-              No history in this window.
+              No fuel fill records found in this date window.
             </div>
           ) : (
             <>
+              {/* Responsive Date-Wise Bar Chart */}
               <div className="h-72 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="histBarGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.95} />
@@ -477,31 +574,101 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
                       dataKey="liters"
                       fill="url(#histBarGrad)"
                       radius={[6, 6, 2, 2]}
-                      maxBarSize={40}
+                      maxBarSize={44}
                       animationDuration={600}
                     />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
 
-              {/* Compact breakdown table */}
-              <div className="overflow-x-auto rounded-xl border">
+              {/* Date-wise breakdown table */}
+              <div className="overflow-x-auto rounded-xl border border-border/70">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="px-4 py-2.5 font-medium">Month</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Liters</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Vouchers</th>
+                    <tr className="border-b-2 border-border/80 bg-slate-100/90 dark:bg-slate-800/90 text-left text-xs uppercase tracking-wide">
+                      <th className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">Date</th>
+                      <th className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">Voucher No.</th>
+                      <th className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">Type</th>
+                      <th className="px-4 py-3 text-right font-bold text-slate-800 dark:text-slate-100">Liters</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {chartRows.map((row) => (
-                      <tr key={row.month} className="border-b last:border-0">
-                        <td className="px-4 py-2.5 font-medium">{row.fullMonth}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">{fmt(row.liters)} L</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">{row.vouchers}</td>
+                    {voucherList.length > 0 ? (
+                      voucherList.map((v) => (
+                        <tr key={v.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">
+                            {formatDisplayDate(v.date)}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className="inline-flex items-center gap-2 font-medium">
+                              {v.voucherNo}
+                              {v.imageUrl && (
+                                <a
+                                  href={v.imageUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title="View voucher image"
+                                  className="block h-7 w-10 shrink-0 overflow-hidden rounded border bg-muted transition-shadow hover:ring-2 hover:ring-primary/50"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={v.imageUrl}
+                                    alt={`Voucher ${v.voucherNo}`}
+                                    className="h-full w-full object-cover"
+                                    loading="lazy"
+                                  />
+                                </a>
+                              )}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold tracking-wide",
+                                v.fuelType === "Petrol"
+                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                                  : "bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/30"
+                              )}
+                            >
+                              {v.fuelType || "Diesel"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums font-semibold">
+                            {fmt(v.liters)} L
+                          </td>
+                        </tr>
+                      ))
+                    ) : chartData.length > 0 ? (
+                      chartData.map((row) => (
+                        <tr key={row.date} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">
+                            {row.fullDate || row.label}
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground">—</td>
+                          <td className="px-4 py-2.5">
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold tracking-wide",
+                                row.fuelType === "Petrol"
+                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                                  : "bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/30"
+                              )}
+                            >
+                              {row.fuelType}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums font-semibold">
+                            {fmt(row.liters)} L
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
+                          No voucher records found in this date window.
+                        </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -509,66 +676,6 @@ export function VehicleHistoryView({ vehicleNo }: { vehicleNo: string }) {
           )}
         </CardContent>
       </Card>
-
-      {/* Recent vouchers */}
-      <Card className="card-premium border-border/60">
-        <CardHeader>
-          <CardTitle className="text-base">Recent vouchers</CardTitle>
-          <CardDescription>Latest {data?.recent.length ?? 0} fills on record.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <Skeleton className="h-24 w-full" />
-          ) : !data || data.recent.length === 0 ? (
-            <div className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-              No vouchers recorded for this vehicle.
-            </div>
-          ) : (
-            <ul className="divide-y rounded-xl border">
-              {data.recent.map((v) => (
-                <li key={v.id} className="flex items-center justify-between gap-4 px-4 py-3">
-                  <div>
-                    <p className="inline-flex items-center gap-2 text-sm font-medium tabular-nums">
-                      {v.voucherNo}
-                      {v.imageUrl && (
-                        <a
-                          href={v.imageUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          title="View voucher image"
-                          className="block h-8 w-11 shrink-0 overflow-hidden rounded border bg-muted transition-shadow hover:ring-2 hover:ring-primary/50"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={v.imageUrl}
-                            alt={`Voucher ${v.voucherNo}`}
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                          />
-                        </a>
-                      )}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(v.date).toLocaleDateString("en-US", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                        timeZone: "UTC",
-                      })}
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-accent px-3 py-1 text-sm font-semibold tabular-nums">
-                    {fmt(v.liters)} L
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
-
-// Recharts AreaChart kept for potential trend overlay in future work.
-export const __unused = { AreaChart, Area };

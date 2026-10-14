@@ -19,6 +19,7 @@ interface CameraScannerProps {
   onCancel?: () => void;
   disabled?: boolean;
   className?: string;
+  active?: boolean;
 }
 
 export function CameraScanner({
@@ -26,10 +27,13 @@ export function CameraScanner({
   onCancel,
   disabled,
   className,
+  active = true,
 }: CameraScannerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fallbackInputRef = useRef<HTMLInputElement | null>(null);
+  const isStartingRef = useRef(false);
+  const currentFacingModeRef = useRef<string | null>(null);
 
   const [starting, setStarting] = useState(true);
   const [capturing, setCapturing] = useState(false);
@@ -45,32 +49,47 @@ export function CameraScanner({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    currentFacingModeRef.current = null;
+    isStartingRef.current = false;
   }, []);
 
   const startCamera = useCallback(
     async (mode: "environment" | "user") => {
-      stopStream();
+      if (isStartingRef.current) return;
+      isStartingRef.current = true;
       setStarting(true);
       setError(null);
+
+      // Stop previous tracks cleanly
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
 
       if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
         setError("Camera access is not supported by this browser. Use photo upload instead.");
         setStarting(false);
+        isStartingRef.current = false;
         return;
       }
 
       try {
+        const isPortrait =
+          typeof window !== "undefined" && window.innerHeight >= window.innerWidth;
+
+        // Balanced constraints: requests vertical aspect on portrait mobile so voucher is not cropped
         const constraints: MediaStreamConstraints = {
           video: {
             facingMode: { ideal: mode },
-            width: { ideal: 1920, min: 640 },
-            height: { ideal: 1080, min: 480 },
+            width: isPortrait ? { ideal: 1080 } : { ideal: 1920 },
+            height: isPortrait ? { ideal: 1920 } : { ideal: 1080 },
           },
           audio: false,
         };
 
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         streamRef.current = stream;
+        currentFacingModeRef.current = mode;
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -86,27 +105,57 @@ export function CameraScanner({
 
         setStarting(false);
       } catch (err: unknown) {
-        console.error("Camera access failed", err);
-        const name = (err as { name?: string })?.name;
-        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-          setError("Camera permission was denied. Please allow camera access in your browser settings, or use the camera photo picker below.");
-        } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-          setError("No camera was found on your device.");
+        const errorObj = err as { name?: string; message?: string };
+        const name = errorObj?.name;
+        const msg = (errorObj?.message || "").toLowerCase();
+        const isPermissionError =
+          name === "NotAllowedError" ||
+          name === "PermissionDeniedError" ||
+          msg.includes("permission") ||
+          msg.includes("dismissed") ||
+          msg.includes("denied");
+
+        if (isPermissionError) {
+          setError(
+            "Camera permission was denied. Please allow camera access in browser settings, or use the camera photo picker below."
+          );
+          console.warn("Camera permission denied:", err);
         } else {
-          setError("Unable to start the camera stream. You can capture using your phone/system camera below.");
+          setError("Could not start camera. Try restarting or use the photo picker below.");
+          console.warn("Camera start failed:", err);
         }
         setStarting(false);
+      } finally {
+        isStartingRef.current = false;
       }
     },
-    [stopStream]
+    []
   );
 
   useEffect(() => {
+    if (!active) {
+      stopStream();
+      return;
+    }
+
+    // Prevent re-triggering and open/close vibrations if camera stream is already running for this mode
+    if (streamRef.current && currentFacingModeRef.current === facingMode) {
+      return;
+    }
+
     startCamera(facingMode);
+
+    return () => {
+      // Do not stop stream on re-render unless component is truly being torn down or active changed
+    };
+  }, [active, facingMode, startCamera, stopStream]);
+
+  // Teardown stream only when scanner unmounts completely
+  useEffect(() => {
     return () => {
       stopStream();
     };
-  }, [facingMode, startCamera, stopStream]);
+  }, [stopStream]);
 
   const switchCamera = () => {
     const nextMode = facingMode === "environment" ? "user" : "environment";
@@ -161,13 +210,12 @@ export function CameraScanner({
         0.92
       );
     } catch (e) {
-      console.error("Capture failed", e);
+      console.warn("Capture failed", e);
       toast.error("Failed to capture image.");
       setCapturing(false);
     }
   }, [capturing, facingMode, onCapture, stopStream]);
 
-  // Fallback for native mobile camera picker
   const handleFallbackFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -179,12 +227,16 @@ export function CameraScanner({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-border/80 bg-neutral-950 text-white shadow-xl",
+        "relative overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-border/80 bg-neutral-950 text-white shadow-xl flex flex-col w-full",
         className
       )}
     >
-      {/* Video Viewport Container: generous portrait height so users do not need to pull phone high */}
-      <div className="relative h-[55vh] min-h-[460px] max-h-[640px] w-full overflow-hidden bg-black sm:min-h-[500px]">
+      {/* 
+        Viewport Container: 
+        - Mobile: covers whole card width and ~4/5 (75-80vh) vertical view
+        - Desktop: sm:h-[460px] md:h-[480px] sm:min-h-[440px] preserved as requested
+      */}
+      <div className="relative h-[75vh] min-h-[480px] max-h-[82vh] sm:h-[460px] md:h-[480px] sm:min-h-[440px] sm:max-h-[500px] w-full overflow-hidden bg-black">
         {/* Live video */}
         <video
           ref={videoRef}
@@ -198,23 +250,23 @@ export function CameraScanner({
           )}
         />
 
-        {/* Viewfinder Overlay / Voucher Target Frame */}
+        {/* Viewfinder Target Frame: Spacious without claustrophobic blackout vignette */}
         {!starting && !error && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-3 sm:p-6">
-            <div className="relative h-[86%] w-[92%] max-w-sm sm:max-w-lg rounded-xl border border-white/30 bg-white/[0.02] shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-2 sm:p-5">
+            <div className="relative h-[92%] w-[96%] sm:w-[94%] max-w-md sm:max-w-xl rounded-xl border border-white/35 bg-white/[0.01]">
               {/* Corner Reticles */}
-              <div className="absolute -left-1 -top-1 h-6 w-6 border-l-4 border-t-4 border-primary rounded-tl-sm" />
-              <div className="absolute -right-1 -top-1 h-6 w-6 border-r-4 border-t-4 border-primary rounded-tr-sm" />
-              <div className="absolute -bottom-1 -left-1 h-6 w-6 border-b-4 border-l-4 border-primary rounded-bl-sm" />
-              <div className="absolute -bottom-1 -right-1 h-6 w-6 border-b-4 border-r-4 border-primary rounded-br-sm" />
+              <div className="absolute -left-1 -top-1 h-6 w-6 border-l-4 border-t-4 border-primary rounded-tl-sm shadow-[0_0_8px_#3b82f6]" />
+              <div className="absolute -right-1 -top-1 h-6 w-6 border-r-4 border-t-4 border-primary rounded-tr-sm shadow-[0_0_8px_#3b82f6]" />
+              <div className="absolute -bottom-1 -left-1 h-6 w-6 border-b-4 border-l-4 border-primary rounded-bl-sm shadow-[0_0_8px_#3b82f6]" />
+              <div className="absolute -bottom-1 -right-1 h-6 w-6 border-b-4 border-r-4 border-primary rounded-br-sm shadow-[0_0_8px_#3b82f6]" />
 
               {/* Laser Scanning Animation Beam */}
               <div className="absolute inset-x-2 h-0.5 bg-gradient-to-r from-transparent via-primary to-transparent shadow-[0_0_8px_#3b82f6] animate-scanline" />
 
               {/* Instruction pill */}
-              <div className="absolute bottom-3 inset-x-0 mx-auto flex w-max items-center gap-1.5 rounded-full bg-black/75 px-3 py-1 text-[11px] font-medium text-white/90 backdrop-blur-sm border border-white/10">
+              <div className="absolute bottom-3 inset-x-0 mx-auto flex w-max items-center gap-1.5 rounded-full bg-black/75 px-3 py-1 text-[11px] font-medium text-white shadow-md backdrop-blur-md border border-white/10">
                 <Sparkles className="h-3 w-3 text-primary animate-pulse" />
-                Align fuel voucher inside frame
+                Align voucher inside frame
               </div>
             </div>
           </div>
@@ -264,14 +316,15 @@ export function CameraScanner({
           onChange={handleFallbackFile}
         />
 
-        {/* Top Control Bar */}
-        <div className="absolute left-3 right-3 top-3 flex items-center justify-between">
-          <div className="flex items-center gap-2 rounded-full bg-black/60 px-3 py-1 text-xs font-semibold backdrop-blur-md border border-white/10">
+        {/* Top Control Bar: Clean with no minimize/maximize clutter */}
+        <div className="absolute left-3 right-3 top-3 flex items-center justify-between z-10">
+          <div className="flex items-center gap-2 rounded-full bg-black/65 px-3 py-1 text-xs font-semibold backdrop-blur-md border border-white/10">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
             VOUCHER SCANNER
           </div>
 
           <div className="flex items-center gap-1.5">
+            {/* Switch Camera Button (only if device has multiple cameras) */}
             {hasMultipleCameras && (
               <Button
                 type="button"
@@ -279,13 +332,14 @@ export function CameraScanner({
                 variant="secondary"
                 onClick={switchCamera}
                 disabled={starting || Boolean(error)}
-                className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-black/80 backdrop-blur-md border border-white/10"
+                className="h-8 w-8 rounded-full bg-black/65 text-white hover:bg-black/85 backdrop-blur-md border border-white/10"
                 title="Switch Camera"
               >
                 <FlipHorizontal className="h-4 w-4" />
               </Button>
             )}
 
+            {/* Close Button */}
             {onCancel && (
               <Button
                 type="button"
@@ -295,7 +349,7 @@ export function CameraScanner({
                   stopStream();
                   onCancel();
                 }}
-                className="h-8 w-8 rounded-full bg-black/60 text-white hover:bg-black/80 backdrop-blur-md border border-white/10"
+                className="h-8 w-8 rounded-full bg-black/65 text-white hover:bg-black/85 backdrop-blur-md border border-white/10"
                 title="Close Scanner"
               >
                 <X className="h-4 w-4" />
@@ -306,7 +360,7 @@ export function CameraScanner({
       </div>
 
       {/* Bottom Shutter & Action Bar */}
-      <div className="flex items-center justify-between gap-1 bg-neutral-900/90 px-3 py-3 sm:px-6 sm:py-4 backdrop-blur-md border-t border-white/10">
+      <div className="flex items-center justify-between gap-2 bg-neutral-900/95 px-4 py-3 sm:px-6 sm:py-3.5 backdrop-blur-md border-t border-white/10 shrink-0">
         <div className="flex items-center min-w-0">
           {onCancel && (
             <Button
@@ -317,9 +371,9 @@ export function CameraScanner({
                 stopStream();
                 onCancel();
               }}
-              className="text-[11px] sm:text-xs text-neutral-300 hover:text-white hover:bg-white/10 px-2 sm:px-3 h-8 sm:h-9"
+              className="text-xs text-neutral-300 hover:text-white hover:bg-white/10 px-2 sm:px-3 h-8 sm:h-9"
             >
-              <Upload className="mr-1 h-3 w-3 sm:mr-1.5 sm:h-3.5 sm:w-3.5" />
+              <Upload className="mr-1.5 h-3.5 w-3.5" />
               <span className="hidden sm:inline">Upload File</span>
               <span className="sm:hidden">Upload</span>
             </Button>
@@ -351,11 +405,11 @@ export function CameraScanner({
             variant="ghost"
             size="sm"
             onClick={() => fallbackInputRef.current?.click()}
-            className="text-[11px] sm:text-xs text-neutral-300 hover:text-white hover:bg-white/10 px-2 sm:px-3 h-8 sm:h-9"
+            className="text-xs text-neutral-300 hover:text-white hover:bg-white/10 px-2 sm:px-3 h-8 sm:h-9"
             title="Snap with phone camera"
           >
-            <Camera className="mr-1 h-3 w-3 sm:mr-1.5 sm:h-3.5 sm:w-3.5" />
-            <span className="hidden sm:inline">Snap Photo</span>
+            <Camera className="mr-1.5 h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Phone Camera</span>
             <span className="sm:hidden">Photo</span>
           </Button>
         </div>

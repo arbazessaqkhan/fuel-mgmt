@@ -7,28 +7,68 @@ import { VoucherTable } from "@/components/dashboard/voucher-table";
 import { VehicleChart } from "@/components/dashboard/vehicle-chart";
 import { FileSpreadsheet, Loader2 } from "lucide-react";
 import type { FuelVoucher as Voucher } from "@prisma/client";
-import { useCallback, useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 
 type SortField = "date" | "voucherNo" | "vehicleNo" | "liters";
 
+interface VouchersApiResponse {
+  items: Voucher[];
+  total: number;
+}
+
 export default function DashboardPage() {
-  const now = new Date();
-  // Stats default to the current month; when the current month has no vouchers
-  // yet, the API falls back to the most recent month with data (flagged via
-  // `fallback`), so the cards never show a misleading 0 on the 1st of a month.
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [vouchers, setVouchers] = useState<Voucher[]>([]);
-  const [total, setTotal] = useState(0);
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [loadingStats, setLoadingStats] = useState(true);
-  const [loadingTable, setLoadingTable] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const pageSize = 10;
+
+  // Cached Stats Query - Stored indefinitely and persisted across reloads until mutations invalidate it
+  const {
+    data: stats,
+    isLoading: loadingStats,
+    error: statsError,
+    refetch: refetchStats,
+  } = useQuery<Stats>({
+    queryKey: ["stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/stats");
+      if (!res.ok) throw new Error("Could not load fleet statistics.");
+      return res.json();
+    },
+  });
+
+  // Cached Vouchers Query - Per-page/search/sort cached indefinitely
+  const {
+    data: vouchersData,
+    isLoading: loadingVouchers,
+    isPlaceholderData,
+    error: vouchersError,
+    refetch: refetchVouchers,
+  } = useQuery<VouchersApiResponse>({
+    queryKey: ["vouchers", { page, pageSize, search, sortField, sortDir }],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+        sortField,
+        sortDir,
+      });
+      if (search) params.set("search", search);
+      const res = await fetch(`/api/vouchers?${params}`);
+      if (!res.ok) throw new Error("Could not load vouchers.");
+      return res.json();
+    },
+    placeholderData: keepPreviousData, // Smooth pagination transitions without layout shifts
+  });
+
+  const vouchers = vouchersData?.items ?? [];
+  const total = vouchersData?.total ?? 0;
+  const error = statsError ? (statsError as Error).message : vouchersError ? (vouchersError as Error).message : null;
 
   const handleExport = async () => {
     setExporting(true);
@@ -53,95 +93,12 @@ export default function DashboardPage() {
     }
   };
 
-  // Restore cached data on mount for instant zero-skeleton rendering
-  useEffect(() => {
-    try {
-      const cachedStats = sessionStorage.getItem("fuellog_cached_stats");
-      if (cachedStats) {
-        setStats(JSON.parse(cachedStats));
-        setLoadingStats(false);
-      }
-      const cachedVouchers = sessionStorage.getItem("fuellog_cached_vouchers");
-      const cachedTotal = sessionStorage.getItem("fuellog_cached_total");
-      if (cachedVouchers && page === 1 && !search) {
-        setVouchers(JSON.parse(cachedVouchers));
-        if (cachedTotal) setTotal(Number(cachedTotal));
-        setLoadingTable(false);
-      }
-    } catch {}
-  }, []);
-
-  const loadStats = useCallback(async (retry = true) => {
-    try {
-      const res = await fetch(`/api/stats?t=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setStats(data);
-      setError(null);
-      try {
-        sessionStorage.setItem("fuellog_cached_stats", JSON.stringify(data));
-      } catch {}
-    } catch {
-      if (retry) {
-        // Auto-retry once in case database was in a cold-start wake-up
-        setTimeout(() => loadStats(false), 1200);
-        return;
-      }
-      setError("Could not load statistics.");
-    } finally {
-      setLoadingStats(false);
-    }
-  }, []);
-
-  const loadVouchers = useCallback(async (retry = true) => {
-    // Only show skeleton if we have no vouchers displayed yet or filtering
-    if (vouchers.length === 0 || page !== 1 || search) {
-      setLoadingTable(true);
-    }
-    try {
-      // No year/month params: the table lists the FULL voucher history;
-      // stats cards + chart stay scoped to the current month.
-      const params = new URLSearchParams({
-        page: String(page),
-        pageSize: String(pageSize),
-        sortField,
-        sortDir,
-        _t: String(Date.now()),
-      });
-      if (search) params.set("search", search);
-      const res = await fetch(`/api/vouchers?${params}`, { cache: "no-store" });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setVouchers(data.items);
-      setTotal(data.total);
-      setError(null);
-      if (page === 1 && !search) {
-        try {
-          sessionStorage.setItem("fuellog_cached_vouchers", JSON.stringify(data.items));
-          sessionStorage.setItem("fuellog_cached_total", String(data.total));
-        } catch {}
-      }
-    } catch {
-      if (retry) {
-        // Auto-retry once in case database was in a cold-start wake-up
-        setTimeout(() => loadVouchers(false), 1200);
-        return;
-      }
-      setError("Could not load vouchers.");
-    } finally {
-      setLoadingTable(false);
-    }
-  }, [page, search, sortField, sortDir, vouchers.length]);
-
-  useEffect(() => { loadStats(); }, [loadStats]);
-  useEffect(() => { loadVouchers(); }, [loadVouchers]);
-
   const changeSort = (field: SortField) => {
     if (field === sortField) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortField(field);
-      setSortDir(field === "liters" ? "desc" : "asc");
+      setSortDir(field === "liters" || field === "date" ? "desc" : "asc");
     }
     setPage(1);
   };
@@ -151,15 +108,22 @@ export default function DashboardPage() {
     setPage(1);
   };
 
+  // Background sync on mount so dashboard always reflects any newly created vouchers
+  useEffect(() => {
+    refetchStats();
+    refetchVouchers();
+  }, [refetchStats, refetchVouchers]);
+
   const refreshAll = () => {
-    setError(null);
+    queryClient.invalidateQueries({ queryKey: ["vouchers"] });
+    queryClient.invalidateQueries({ queryKey: ["stats"] });
+    queryClient.removeQueries({ queryKey: ["vouchers"] });
+    queryClient.removeQueries({ queryKey: ["stats"] });
     try {
-      sessionStorage.removeItem("fuellog_cached_stats");
-      sessionStorage.removeItem("fuellog_cached_vouchers");
-      sessionStorage.removeItem("fuellog_cached_total");
+      window.localStorage.removeItem("FUELLOG_QUERY_CACHE_V1");
     } catch {}
-    loadStats(false);
-    loadVouchers(false);
+    refetchStats();
+    refetchVouchers();
   };
 
   return (
@@ -202,11 +166,11 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <MetricCards stats={stats} loading={loadingStats} />
+      <MetricCards stats={stats ?? null} loading={loadingStats && !stats} />
 
-      <div className="grid min-w-0 items-stretch gap-6 xl:grid-cols-5">
-        <Card className="card-premium min-w-0 border-border/60 xl:col-span-3 flex flex-col h-full">
-          <CardContent className="p-4 sm:p-6 flex flex-1 flex-col">
+      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-5">
+        <Card className="card-premium min-w-0 border-border/60 xl:col-span-3">
+          <CardContent className="p-4 sm:p-6">
             <VoucherTable
               vouchers={vouchers}
               total={total}
@@ -215,7 +179,7 @@ export default function DashboardPage() {
               search={search}
               sortField={sortField}
               sortDir={sortDir}
-              loading={loadingTable}
+              loading={loadingVouchers && !vouchersData}
               onSearch={changeSearch}
               onSort={changeSort}
               onPage={setPage}
@@ -223,8 +187,8 @@ export default function DashboardPage() {
             />
           </CardContent>
         </Card>
-        <div className="min-w-0 xl:col-span-2 flex flex-col h-full">
-          <VehicleChart stats={stats} loading={loadingStats} />
+        <div className="min-w-0 xl:col-span-2">
+          <VehicleChart stats={stats ?? null} loading={loadingStats && !stats} />
         </div>
       </div>
     </div>

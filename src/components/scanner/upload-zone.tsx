@@ -14,12 +14,16 @@ const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 export function UploadZone({
   onFileSelected,
   onClear,
+  onCancel,
+  onStartCamera,
   previewUrl,
   progress,
   disabled,
 }: {
   onFileSelected: (file: File) => void;
   onClear: () => void;
+  onCancel?: () => void;
+  onStartCamera?: () => void;
   previewUrl: string | null;
   progress: number | null; // 0..100, null = not running
   disabled?: boolean;
@@ -71,34 +75,59 @@ export function UploadZone({
       />
 
       {previewUrl ? (
-        <div className="relative overflow-hidden rounded-lg border bg-muted">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={previewUrl}
-            alt="Voucher preview"
-            className="mx-auto max-h-72 w-auto object-contain"
-          />
-          {progress != null && (
-            <div className="absolute inset-x-0 bottom-0 space-y-1 bg-background/90 p-3">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>Running OCR…</span>
-                <span>{progress}%</span>
+        <div className="space-y-2">
+          <div className="relative overflow-hidden rounded-lg border bg-muted">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewUrl}
+              alt="Voucher preview"
+              className="mx-auto max-h-72 w-auto object-contain"
+            />
+            {progress != null && (
+              <div className="absolute inset-x-0 bottom-0 space-y-2 bg-background/95 p-3 backdrop-blur-sm border-t">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-foreground">Running AI OCR… {progress}%</span>
+                  {onCancel && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      className="h-6 px-2 text-[11px] gap-1 bg-red-600 hover:bg-red-700 text-white font-medium shadow-xs"
+                      onClick={onCancel}
+                    >
+                      <X className="h-3 w-3" /> Stop &amp; Cancel
+                    </Button>
+                  )}
+                </div>
+                <Progress value={progress} />
               </div>
-              <Progress value={progress} />
-            </div>
-          )}
+            )}
+            <Button
+              size="icon"
+              variant="secondary"
+              className="absolute right-2 top-2 h-7 w-7 rounded-full shadow-xs"
+              onClick={() => {
+                if (progress != null) onCancel?.();
+                setMode("upload");
+                onClear();
+              }}
+              aria-label="Remove image"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
           <Button
-            size="icon"
-            variant="secondary"
-            className="absolute right-2 top-2"
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full h-9 text-xs gap-1.5 font-medium border-border/80 hover:border-destructive/40 hover:text-destructive"
             onClick={() => {
+              if (progress != null) onCancel?.();
               setMode("upload");
               onClear();
             }}
-            disabled={disabled || progress != null}
-            aria-label="Remove image"
           >
-            <X className="h-4 w-4" />
+            <X className="h-3.5 w-3.5" /> Cancel / Upload Brand New Voucher
           </Button>
         </div>
       ) : mode === "camera" ? (
@@ -161,7 +190,13 @@ export function UploadZone({
           <Button
             type="button"
             variant="outline"
-            onClick={() => setMode("camera")}
+            onClick={() => {
+              if (onStartCamera) {
+                onStartCamera();
+              } else {
+                setMode("camera");
+              }
+            }}
             disabled={disabled}
             className="w-full h-11 rounded-xl border-border/80 hover:border-primary/50 hover:bg-primary/5 text-sm font-medium gap-2 transition-colors"
           >

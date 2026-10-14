@@ -12,10 +12,25 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { FuelVoucher as Voucher } from "@prisma/client";
-import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, Pencil, Search, Trash2, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Loader2,
+  Pencil,
+  Search,
+  Trash2,
+  X,
+  ImageIcon,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -32,7 +47,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ImageIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type SortField = "date" | "voucherNo" | "vehicleNo" | "liters";
 
@@ -88,6 +103,7 @@ export function VoucherTable(props: VoucherTableProps) {
   const [editImageBusy, setEditImageBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -135,6 +151,14 @@ export function VoucherTable(props: VoucherTableProps) {
       if (!res.ok) throw new Error();
       toast.success(`${data.deleted ?? selected.size} voucher${selected.size === 1 ? "" : "s"} deleted`);
       clearSelection();
+      queryClient.invalidateQueries({ queryKey: ["vouchers"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+      queryClient.invalidateQueries({ queryKey: ["vehicle"] });
+      queryClient.removeQueries({ queryKey: ["vouchers"] });
+      queryClient.removeQueries({ queryKey: ["stats"] });
+      try {
+        window.localStorage.removeItem("FUELLOG_QUERY_CACHE_V1");
+      } catch {}
       onChanged();
     } catch {
       toast.error("Could not delete the selected vouchers");
@@ -144,11 +168,12 @@ export function VoucherTable(props: VoucherTableProps) {
   }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const columns: Array<{ key: SortField | "actions" | "select"; label: string; sortable?: boolean }> = [
+  const columns: Array<{ key: SortField | "actions" | "select" | "fuelType"; label: string; sortable?: boolean }> = [
     { key: "select", label: "" },
     { key: "date", label: "Date", sortable: true },
     { key: "voucherNo", label: "Voucher No.", sortable: true },
     { key: "vehicleNo", label: "Vehicle No.", sortable: true },
+    { key: "fuelType", label: "Type", sortable: false },
     { key: "liters", label: "Liters", sortable: true },
     { key: "actions", label: "" },
   ];
@@ -168,6 +193,14 @@ export function VoucherTable(props: VoucherTableProps) {
       if (!res.ok) throw new Error();
       toast.success(`Voucher ${deleting.voucherNo} deleted`);
       setDeleting(null);
+      queryClient.invalidateQueries({ queryKey: ["vouchers"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+      queryClient.invalidateQueries({ queryKey: ["vehicle"] });
+      queryClient.removeQueries({ queryKey: ["vouchers"] });
+      queryClient.removeQueries({ queryKey: ["stats"] });
+      try {
+        window.localStorage.removeItem("FUELLOG_QUERY_CACHE_V1");
+      } catch {}
       onChanged();
     } catch {
       toast.error("Could not delete the voucher");
@@ -230,6 +263,14 @@ export function VoucherTable(props: VoucherTableProps) {
       }
       toast.success("Voucher updated");
       setEdit(null);
+      queryClient.invalidateQueries({ queryKey: ["vouchers"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+      queryClient.invalidateQueries({ queryKey: ["vehicle"] });
+      queryClient.removeQueries({ queryKey: ["vouchers"] });
+      queryClient.removeQueries({ queryKey: ["stats"] });
+      try {
+        window.localStorage.removeItem("FUELLOG_QUERY_CACHE_V1");
+      } catch {}
       onChanged();
     } catch {
       setEditError("Network error — could not reach the server.");
@@ -239,8 +280,8 @@ export function VoucherTable(props: VoucherTableProps) {
   }
 
   return (
-    <div className="flex h-full flex-col justify-between space-y-4">
-      <div className="flex flex-1 flex-col space-y-3">
+    <div className="flex flex-col space-y-4">
+      <div className="flex flex-col space-y-3">
         {selected.size > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5">
             <span className="text-sm font-medium">
@@ -292,158 +333,199 @@ export function VoucherTable(props: VoucherTableProps) {
           )}
         </div>
 
-        <div className="flex-1 min-h-[300px] w-full rounded-xl border border-border/70 overflow-hidden bg-card shadow-xs">
+        <div className="w-full rounded-xl border border-border/70 overflow-hidden bg-card shadow-xs">
           <Table className="w-full">
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              {columns.map((c) => (
-                <TableHead key={c.key} className={c.key === "select" ? "w-10 pr-0" : undefined}>
-                  {c.key === "select" ? (
-                    <Checkbox
-                      aria-label="Select all vouchers on this page"
-                      checked={allOnPageSelected ? true : someOnPageSelected ? "indeterminate" : false}
-                      onCheckedChange={toggleAll}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  ) : c.sortable ? (
-                    <button
-                      className="flex items-center font-medium hover:text-foreground"
-                      onClick={() => onSort(c.key as SortField)}
-                    >
-                      {c.label}
-                      <SortIcon field={c.key as SortField} />
-                    </button>
-                  ) : (
-                    c.label
-                  )}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              Array.from({ length: 5 }).map((_, i) => (
-                <TableRow key={i}>
-                  {columns.map((c) => (
-                    <TableCell key={c.key}>
-                      <Skeleton className="h-4 w-full" />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : vouchers.length === 0 ? (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground select-none">
-                  {search
-                    ? `No vouchers match "${search}" in this month.`
-                    : "No vouchers for this month yet. Scan one to get started."}
-                </TableCell>
+            <TableHeader className="bg-slate-100 dark:bg-slate-800/90 border-b-2 border-border/80">
+              <TableRow className="hover:bg-transparent border-b-2 border-border/80 bg-slate-100/90 dark:bg-slate-800/90">
+                {columns.map((c) => (
+                  <TableHead
+                    key={c.key}
+                    className={cn(
+                      "py-3.5 text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 tracking-wide",
+                      c.key === "select" ? "w-10 pr-0" : undefined
+                    )}
+                  >
+                    {c.key === "select" ? (
+                      <Checkbox
+                        aria-label="Select all vouchers on this page"
+                        checked={allOnPageSelected ? true : someOnPageSelected ? "indeterminate" : false}
+                        onCheckedChange={toggleAll}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : c.sortable ? (
+                      <button
+                        className="flex items-center font-bold text-slate-800 dark:text-slate-100 hover:text-primary transition-colors tracking-wide"
+                        onClick={() => onSort(c.key as SortField)}
+                      >
+                        <span>{c.label}</span>
+                        <SortIcon field={c.key as SortField} />
+                      </button>
+                    ) : (
+                      <span className="font-bold text-slate-800 dark:text-slate-100">{c.label}</span>
+                    )}
+                  </TableHead>
+                ))}
               </TableRow>
-            ) : (
-              vouchers.map((v) => (
-                <TableRow
-                  key={v.id}
-                  className="cursor-pointer transition-colors hover:bg-muted/40 active:bg-muted/60"
-                  onClick={() => router.push(`/vehicles/${encodeURIComponent(v.vehicleNo)}`)}
-                >
-                  <TableCell className="pr-0" onClick={(e) => e.stopPropagation()}>
-                    <Checkbox
-                      aria-label={`Select voucher ${v.voucherNo}`}
-                      checked={selected.has(v.id)}
-                      onCheckedChange={() => toggleRow(v.id)}
-                    />
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">{fmtDate(v.date)}</TableCell>
-                  <TableCell className="font-medium">
-                    <span className="inline-flex items-center gap-2">
-                      {v.voucherNo}
-                      {v.imageUrl && (
-                        <a
-                          href={v.imageUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          title="View voucher image"
-                          onClick={(e) => e.stopPropagation()}
-                          className="block h-9 w-12 shrink-0 overflow-hidden rounded border bg-muted transition-shadow hover:ring-2 hover:ring-primary/50"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={v.imageUrl}
-                            alt={`Voucher ${v.voucherNo}`}
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                          />
-                        </a>
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell className="font-medium">{v.vehicleNo}</TableCell>
-                  <TableCell className="tabular-nums">{v.liters.toFixed(2)}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label={`Edit ${v.voucherNo}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEdit(v);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="text-destructive hover:text-destructive"
-                        aria-label={`Delete ${v.voucherNo}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleting(v);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    {columns.map((c) => (
+                      <TableCell key={c.key}>
+                        <Skeleton className="h-4 w-full" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : vouchers.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground select-none">
+                    {search
+                      ? `No vouchers match "${search}" in this month.`
+                      : "No vouchers for this month yet. Scan one to get started."}
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              ) : (
+                vouchers.map((v) => (
+                  <TableRow
+                    key={v.id}
+                    className="cursor-pointer transition-colors hover:bg-muted/40 active:bg-muted/60"
+                    onClick={() => router.push(`/vehicles/${encodeURIComponent(v.vehicleNo)}`)}
+                  >
+                    <TableCell className="pr-0" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        aria-label={`Select voucher ${v.voucherNo}`}
+                        checked={selected.has(v.id)}
+                        onCheckedChange={() => toggleRow(v.id)}
+                      />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{fmtDate(v.date)}</TableCell>
+                    <TableCell className="font-medium">
+                      <span className="inline-flex items-center gap-2">
+                        {v.voucherNo}
+                        {v.imageUrl && (
+                          <a
+                            href={v.imageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="View voucher image"
+                            onClick={(e) => e.stopPropagation()}
+                            className="block h-9 w-12 shrink-0 overflow-hidden rounded border bg-muted transition-shadow hover:ring-2 hover:ring-primary/50"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={v.imageUrl}
+                              alt={`Voucher ${v.voucherNo}`}
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          </a>
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell className="font-medium">{v.vehicleNo}</TableCell>
+                    <TableCell>
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold tracking-wide",
+                          v.fuelType === "Petrol"
+                            ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+                            : "bg-blue-500/15 text-blue-700 dark:text-blue-400 border border-blue-500/30"
+                        )}
+                      >
+                        {v.fuelType || "Diesel"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="tabular-nums font-medium">{v.liters.toFixed(2)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Edit ${v.voucherNo}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEdit(v);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          aria-label={`Delete ${v.voucherNo}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleting(v);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 pt-3 text-sm text-muted-foreground border-t border-border/40 mt-auto">
-        <span>
-          {total === 0
-            ? "0 vouchers"
-            : total === 1
-            ? "1 voucher total"
-            : `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total} vouchers`}
-        </span>
-        {totalPages > 1 && (
-          <div className="flex items-center gap-2">
+      {total > 0 && (
+        <div className="flex items-center justify-center sm:justify-end pt-3 border-t border-border/40">
+          <div className="flex items-center gap-1 sm:gap-1.5">
             <Button
               variant="outline"
-              size="sm"
+              size="icon"
+              className="h-8 w-8 text-xs"
+              disabled={page <= 1 || loading}
+              onClick={() => onPage(1)}
+              title="First page"
+              aria-label="First page"
+            >
+              <ChevronsLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8 text-xs"
               disabled={page <= 1 || loading}
               onClick={() => onPage(page - 1)}
+              title="Previous page"
+              aria-label="Previous page"
             >
-              Previous
+              <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="text-xs font-medium">Page {page} of {totalPages}</span>
+            <span className="px-2 text-xs font-medium text-foreground whitespace-nowrap">
+              Page {page} of {totalPages}
+            </span>
             <Button
               variant="outline"
-              size="sm"
+              size="icon"
+              className="h-8 w-8 text-xs"
               disabled={page >= totalPages || loading}
               onClick={() => onPage(page + 1)}
+              title="Next page"
+              aria-label="Next page"
             >
-              Next
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8 text-xs"
+              disabled={page >= totalPages || loading}
+              onClick={() => onPage(totalPages)}
+              title="Last page"
+              aria-label="Last page"
+            >
+              <ChevronsRight className="h-4 w-4" />
             </Button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Bulk delete confirmation */}
       <Dialog open={bulkConfirm} onOpenChange={(o) => !o && setBulkConfirm(false)}>

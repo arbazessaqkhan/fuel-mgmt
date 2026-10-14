@@ -2,13 +2,15 @@
   "name": "FuelLog Fleet Manager",
   "short_name": "FuelLog",
   "description": "Scan fuel vouchers, track vehicle consumption, and manage fleet fuel logs.",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "scope": "/",
-  "id": "/",
+  "id": "fuellog-fleet-manager",
   "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
   "background_color": "#0f172a",
   "theme_color": "#2563eb",
   "orientation": "portrait-primary",
+  "categories": ["business", "productivity", "utilities"],
   "icons": [
     {
       "src": "/icon-192.png",

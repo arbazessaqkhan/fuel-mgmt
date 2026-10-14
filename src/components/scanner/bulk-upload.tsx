@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,8 @@ import {
   Loader2,
   Save,
   Trash2,
+  RotateCcw,
+  XCircle,
 } from "lucide-react";
 import {
   Dialog,
@@ -45,7 +48,7 @@ export interface BulkEntry {
   error?: string;
 }
 
-const EMPTY: Omit<BulkEntry, "rowId" | "status"> = {
+const EMPTY_ROW: Omit<BulkEntry, "rowId" | "status"> = {
   voucherNo: "",
   vehicleNo: "",
   liters: "",
@@ -72,6 +75,7 @@ function entryFromRaw(raw: {
 }
 
 export function BulkUpload() {
+  const queryClient = useQueryClient();
   const [entries, setEntries] = useState<BulkEntry[]>([]);
   const [processing, setProcessing] = useState(false);
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
@@ -83,6 +87,32 @@ export function BulkUpload() {
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const uploadedBlobUrlsRef = useRef<Map<Blob, string>>(new Map());
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleStopBulk = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setProcessing(false);
+    setProgressLabel(null);
+    toast.info("Bulk extraction stopped. You can edit any extracted entries or upload a brand new file.");
+  }, []);
+
+  const handleResetAll = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setProcessing(false);
+    setProgressLabel(null);
+    setEntries([]);
+    setFileName(null);
+    pageUrls.forEach((u) => URL.revokeObjectURL(u));
+    setPageUrls(new Map());
+    setPageBlobs(new Map());
+    toast.info("Cleared. You can upload a brand new file.");
+  }, [pageUrls]);
 
   const uploadBlobsConcurrently = useCallback(async (blobs: Blob[]) => {
     const unique = Array.from(new Set(blobs)).filter((b) => !uploadedBlobUrlsRef.current.has(b));
@@ -119,7 +149,11 @@ export function BulkUpload() {
     if (!blob) throw new Error(`Could not render ${label}`);
     const fd = new FormData();
     fd.append("image", blob, "page.jpg");
-    const res = await fetch("/api/ocr/bulk", { method: "POST", body: fd });
+    const res = await fetch("/api/ocr/bulk", {
+      method: "POST",
+      body: fd,
+      signal: abortControllerRef.current?.signal,
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(data.error ?? `Extraction failed for ${label}`);
@@ -143,6 +177,10 @@ export function BulkUpload() {
       setProcessing(true);
       pageUrls.forEach((u) => URL.revokeObjectURL(u));
       setPageUrls(new Map());
+
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
       try {
         const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
         const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp|avif|bmp)$/i.test(file.name);
@@ -162,6 +200,7 @@ export function BulkUpload() {
           const pageUrlsMap = new Map<string, string>();
           const urlByBlob = new Map<Blob, string>();
           for (let i = 1; i <= pdf.numPages; i++) {
+            if (abortController.signal.aborted) break;
             setProgressLabel(`Page ${i} of ${pdf.numPages}…`);
             const page = await pdf.getPage(i);
             const viewport = page.getViewport({ scale: 2 });
@@ -171,22 +210,33 @@ export function BulkUpload() {
             const ctx = canvas.getContext("2d");
             if (!ctx) throw new Error("Canvas not supported in this browser.");
             await page.render({ canvasContext: ctx, viewport }).promise;
-            const { entries: pageEntries, warnings: pageWarnings, pageBlob } = await extractPage(
-              canvas,
-              `page ${i}`
-            );
-            let pUrl = urlByBlob.get(pageBlob);
-            if (!pUrl) {
-              pUrl = URL.createObjectURL(pageBlob);
-              urlByBlob.set(pageBlob, pUrl);
+            if (abortController.signal.aborted) break;
+            try {
+              const { entries: pageEntries, warnings: pageWarnings, pageBlob } = await extractPage(
+                canvas,
+                `page ${i}`
+              );
+              if (abortController.signal.aborted) break;
+              let pUrl = urlByBlob.get(pageBlob);
+              if (!pUrl) {
+                pUrl = URL.createObjectURL(pageBlob);
+                urlByBlob.set(pageBlob, pUrl);
+              }
+              for (const e of pageEntries) {
+                pageBlobs.set(e.rowId, pageBlob);
+                pageUrlsMap.set(e.rowId, pUrl);
+              }
+              collected.push(...pageEntries);
+              warnings.push(...pageWarnings.map((w) => `Page ${i}: ${w}`));
+            } catch (pageErr) {
+              if (abortController.signal.aborted) break;
+              console.warn(`Extraction notice for page ${i}:`, pageErr);
+              warnings.push(
+                `Page ${i}: ${pageErr instanceof Error ? pageErr.message : "Service busy on this page"}`
+              );
             }
-            for (const e of pageEntries) {
-              pageBlobs.set(e.rowId, pageBlob);
-              pageUrlsMap.set(e.rowId, pUrl);
-            }
-            collected.push(...pageEntries);
-            warnings.push(...pageWarnings.map((w) => `Page ${i}: ${w}`));
           }
+          if (abortController.signal.aborted) return;
           if (collected.length === 0) {
             toast.warning("No vouchers found", {
               description: warnings[0] ?? "No voucher entries were detected in this PDF.",
@@ -194,7 +244,7 @@ export function BulkUpload() {
           } else {
             toast.success(`${collected.length} entries extracted`, {
               description: warnings.length
-                ? `${warnings.length} page(s) had warnings — review the entries below.`
+                ? `${warnings.length} page(s) had notices — review the entries below.`
                 : "Review the entries below, then save the batch.",
             });
           }
@@ -208,6 +258,7 @@ export function BulkUpload() {
             await fileToCanvas(file),
             file.name
           );
+          if (abortController.signal.aborted) return;
           const pUrl = URL.createObjectURL(pageBlob);
           const imgMap = new Map<string, Blob>();
           const urlMap = new Map<string, string>();
@@ -228,8 +279,11 @@ export function BulkUpload() {
           toast.error("Unsupported file", { description: "Upload a PDF or an image (JPG, PNG, WebP)." });
         }
       } catch (err) {
-        console.error(err);
-        toast.error("Bulk extraction failed", {
+        if ((err as Error)?.name === "AbortError" || abortControllerRef.current?.signal.aborted) {
+          return;
+        }
+        console.warn("Bulk upload extraction notice:", err);
+        toast.error("Bulk extraction notice", {
           description: err instanceof Error ? err.message : "Something went wrong processing this file.",
         });
       } finally {
@@ -319,6 +373,11 @@ export function BulkUpload() {
       );
     }
     setSaving(false);
+    if (results.saved > 0) {
+      queryClient.invalidateQueries({ queryKey: ["vouchers"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+      queryClient.invalidateQueries({ queryKey: ["vehicle"] });
+    }
     try {
       sessionStorage.removeItem("fuellog_cached_stats");
       sessionStorage.removeItem("fuellog_cached_vouchers");
@@ -369,6 +428,18 @@ export function BulkUpload() {
             <p className="text-xs text-muted-foreground">
               Reading every voucher entry — large PDFs take longer.
             </p>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleStopBulk();
+              }}
+              className="mt-2 h-8 px-3 gap-1.5 font-medium bg-red-600 hover:bg-red-700 text-white shadow-xs"
+            >
+              <XCircle className="h-4 w-4" /> Stop / Cancel Extraction
+            </Button>
           </>
         ) : (
           <>
@@ -397,7 +468,7 @@ export function BulkUpload() {
 
       {entries.length > 0 && (
         <Card className="card-premium border-border/60">
-          <CardContent className="pt-6">
+          <CardContent className="p-3 sm:p-6 pt-4 sm:pt-6">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm">
                 <span className="font-semibold">{entries.length} entries</span>
@@ -412,32 +483,49 @@ export function BulkUpload() {
                   </Badge>
                 )}
               </div>
-              <Button onClick={saveAll} disabled={saving || pending === 0} size="sm">
-                {saving ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-2 h-4 w-4" />
-                )}
-                {saving ? "Saving batch…" : `Save all (${pending})`}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResetAll}
+                  disabled={saving || processing}
+                  className="gap-1.5 text-xs border-border/80 hover:border-destructive/40 hover:text-destructive"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" /> Cancel / Upload Brand New File
+                </Button>
+                <Button onClick={saveAll} disabled={saving || pending === 0} size="sm">
+                  {saving ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" />
+                  )}
+                  {saving ? "Saving batch…" : `Save all (${pending})`}
+                </Button>
+              </div>
             </div>
-            <div className="max-h-[480px] overflow-auto rounded-lg border">
-              <Table>
-                <TableHeader className="sticky top-0 z-10 bg-background">
-                  <TableRow>
-                    <TableHead className="w-[84px]">Receipt</TableHead>
-                    <TableHead className="w-[140px]">Voucher No.</TableHead>
-                    <TableHead className="w-[150px]">Vehicle No.</TableHead>
-                    <TableHead className="w-[110px]">Liters</TableHead>
-                    <TableHead className="w-[150px]">Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-[50px]" />
+
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground sm:hidden px-1 mb-1.5 font-medium">
+              <span>Scroll horizontally to see all fields</span>
+              <span className="font-semibold text-primary">⇄ Swipe</span>
+            </div>
+
+            <div className="w-full max-h-[480px] overflow-x-auto overflow-y-auto rounded-lg border border-border/70 bg-card shadow-xs">
+              <Table className="w-full min-w-[760px]">
+                <TableHeader className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800/90 border-b-2 border-border/80">
+                  <TableRow className="hover:bg-transparent border-b-2 border-border/80 bg-slate-100/90 dark:bg-slate-800/90">
+                    <TableHead className="w-[76px] min-w-[76px] font-bold text-slate-800 dark:text-slate-100">Receipt</TableHead>
+                    <TableHead className="w-[140px] min-w-[140px] font-bold text-slate-800 dark:text-slate-100">Voucher No.</TableHead>
+                    <TableHead className="w-[140px] min-w-[140px] font-bold text-slate-800 dark:text-slate-100">Vehicle No.</TableHead>
+                    <TableHead className="w-[105px] min-w-[105px] font-bold text-slate-800 dark:text-slate-100">Liters</TableHead>
+                    <TableHead className="w-[155px] min-w-[155px] font-bold text-slate-800 dark:text-slate-100">Date</TableHead>
+                    <TableHead className="w-[105px] min-w-[105px] font-bold text-slate-800 dark:text-slate-100">Status</TableHead>
+                    <TableHead className="w-[48px] min-w-[48px] font-bold text-slate-800 dark:text-slate-100" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {entries.map((e) => (
                     <TableRow key={e.rowId} className={rowTone(e.status)}>
-                      <TableCell className="py-1.5">
+                      <TableCell className="w-[76px] min-w-[76px] py-1.5">
                         {pageUrls.get(e.rowId) ? (
                           <button
                             type="button"
@@ -464,25 +552,25 @@ export function BulkUpload() {
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="w-[140px] min-w-[140px]">
                         <Input
-                          className="h-8"
+                          className="h-8 text-xs sm:text-sm"
                           value={e.voucherNo}
                           onChange={(ev) => setField(e.rowId, "voucherNo", ev.target.value.toUpperCase())}
                           aria-label={`Voucher number row ${e.rowId}`}
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="w-[140px] min-w-[140px]">
                         <Input
-                          className="h-8"
+                          className="h-8 text-xs sm:text-sm"
                           value={e.vehicleNo}
                           onChange={(ev) => setField(e.rowId, "vehicleNo", ev.target.value.toUpperCase())}
                           aria-label={`Vehicle number row ${e.rowId}`}
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="w-[105px] min-w-[105px]">
                         <Input
-                          className="h-8"
+                          className="h-8 text-xs sm:text-sm"
                           type="number"
                           step="0.01"
                           min="0"
@@ -491,17 +579,17 @@ export function BulkUpload() {
                           aria-label={`Liters row ${e.rowId}`}
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="w-[155px] min-w-[155px]">
                         <Input
-                          className="h-8"
+                          className="h-8 text-xs sm:text-sm"
                           type="date"
                           value={e.date}
                           onChange={(ev) => setField(e.rowId, "date", ev.target.value)}
                           aria-label={`Date row ${e.rowId}`}
                         />
                       </TableCell>
-                      <TableCell><StatusCell entry={e} /></TableCell>
-                      <TableCell>
+                      <TableCell className="w-[105px] min-w-[105px]"><StatusCell entry={e} /></TableCell>
+                      <TableCell className="w-[48px] min-w-[48px]">
                         <Button
                           size="icon"
                           variant="ghost"

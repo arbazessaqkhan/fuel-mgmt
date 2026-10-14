@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SiteHeader } from "@/components/site-header";
 import { Toaster } from "@/components/ui/sonner";
+import { QueryProvider } from "@/components/providers/query-provider";
+import { ServiceWorkerRegister } from "@/components/providers/service-worker-register";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -53,17 +55,15 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background text-foreground overflow-x-hidden`}
       >
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          <SiteHeader />
-          <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
-            {children}
-          </main>
-          <Toaster richColors position="bottom-right" />
+          <QueryProvider>
+            <SiteHeader />
+            <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-10">
+              {children}
+            </main>
+            <Toaster richColors position="bottom-right" />
+            <ServiceWorkerRegister />
+          </QueryProvider>
         </ThemeProvider>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}`,
-          }}
-        />
       </body>
     </html>
   );

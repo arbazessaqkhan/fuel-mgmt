@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { UploadZone } from "@/components/scanner/upload-zone";
 import { VoucherForm } from "@/components/scanner/voucher-form";
 import { BulkUpload } from "@/components/scanner/bulk-upload";
-import { Layers, ScanLine, Camera } from "lucide-react";
+import { Layers, ScanLine, Camera, XCircle, RotateCcw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CameraScanner } from "@/components/scanner/camera-scanner";
 import { Progress } from "@/components/ui/progress";
@@ -23,6 +23,24 @@ export default function ScanPage() {
   const [ocr, setOcr] = useState<OcrResult | null>(null);
   const busy = progress != null;
   const previewRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleClear = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    previewRef.current = null;
+    setPreviewUrl(null);
+    setOcr(null);
+    setProgress(null);
+  }, []);
+
+  const handleCancelOcr = useCallback(() => {
+    handleClear();
+    toast.info("Scanning stopped. You can upload a new voucher or enter fields manually.");
+  }, [handleClear]);
 
   const handleFile = useCallback(async (file: File) => {
     // reset previous state
@@ -33,8 +51,11 @@ export default function ScanPage() {
     setOcr(null);
     setProgress(0);
 
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
-      setProgress(15);
+      setProgress(20);
       let visionSucceeded = false;
       let result: OcrResult = {
         voucherNo: { value: null, confidence: 0 },
@@ -45,12 +66,16 @@ export default function ScanPage() {
         engineConfidence: 0,
       };
 
-      // 1. Fast path: Direct AI Vision (1.5s instead of 10s)
+      // 1. Fast path: Direct AI Vision with Gemini (1.0s response)
       try {
         const fd = new FormData();
         fd.append("image", file);
-        setProgress(45);
-        const res = await fetch("/api/ocr/vision-correct", { method: "POST", body: fd });
+        setProgress(50);
+        const res = await fetch("/api/ocr/vision-correct", {
+          method: "POST",
+          body: fd,
+          signal: abortController.signal,
+        });
         if (res.ok) {
           const corr = (await res.json()) as Record<string, { value: string | number | null; confidence: number }>;
           result.voucherNo = (corr.voucherNo as any) ?? result.voucherNo;
@@ -66,14 +91,22 @@ export default function ScanPage() {
           setOcr(result);
           return;
         }
-      } catch (err) {
+      } catch (err: unknown) {
+        if ((err as Error)?.name === "AbortError") {
+          return; // User cancelled
+        }
         console.warn("Direct vision pass unavailable, falling back to local OCR:", err);
       }
+
+      if (abortController.signal.aborted) return;
 
       // 2. Fallback path: If vision service was unavailable, run local Tesseract OCR
       if (!visionSucceeded) {
         toast.info("AI vision busy — using basic local scanner...", { duration: 4000 });
-        const localResult = await getOcrService().recognize(file, (p) => setProgress(p));
+        const localResult = await getOcrService().recognize(file, (p) => {
+          if (!abortController.signal.aborted) setProgress(p);
+        });
+        if (abortController.signal.aborted) return;
         result = localResult;
         if (result.engineConfidence < 0.15 && !result.voucherNo.value && !result.liters.value) {
           toast.error("Could not read the voucher", {
@@ -87,7 +120,8 @@ export default function ScanPage() {
         }
         setOcr(result);
       }
-    } catch {
+    } catch (err: unknown) {
+      if ((err as Error)?.name === "AbortError") return;
       toast.error("OCR failed", {
         description:
           "Something went wrong while processing the image. You can still enter the voucher details manually.",
@@ -106,14 +140,6 @@ export default function ScanPage() {
     }
   }, []);
 
-  const handleClear = useCallback(() => {
-    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
-    previewRef.current = null;
-    setPreviewUrl(null);
-    setOcr(null);
-    setProgress(null);
-  }, []);
-
   return (
     <div className="space-y-6">
       <div>
@@ -125,25 +151,28 @@ export default function ScanPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <div className="w-full max-w-full overflow-x-auto no-scrollbar pb-1">
-          <TabsList className="inline-flex h-11 w-max min-w-full items-center justify-start rounded-full bg-muted/90 p-1 border border-border/60 text-muted-foreground shadow-xs">
+        <div className="w-full">
+          <TabsList className="grid grid-cols-3 w-full max-w-lg mx-auto sm:max-w-xl h-11 items-center rounded-full bg-muted/90 p-1 border border-border/60 text-muted-foreground shadow-xs">
             <TabsTrigger
               value="camera"
-              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium whitespace-nowrap transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+              className="rounded-full px-1 sm:px-4 py-2 text-[11px] sm:text-sm font-medium whitespace-nowrap transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm flex items-center justify-center gap-1 sm:gap-1.5"
             >
-              <Camera className="mr-1.5 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4" /> Live Scanner
+              <Camera className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+              <span>Live <span className="hidden sm:inline">Scanner</span></span>
             </TabsTrigger>
             <TabsTrigger
               value="single"
-              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium whitespace-nowrap transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+              className="rounded-full px-1 sm:px-4 py-2 text-[11px] sm:text-sm font-medium whitespace-nowrap transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm flex items-center justify-center gap-1 sm:gap-1.5"
             >
-              <ScanLine className="mr-1.5 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4" /> Single voucher
+              <ScanLine className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+              <span>Single <span className="hidden sm:inline">voucher</span></span>
             </TabsTrigger>
             <TabsTrigger
               value="bulk"
-              className="rounded-full px-4 py-2 text-xs sm:text-sm font-medium whitespace-nowrap transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+              className="rounded-full px-1 sm:px-4 py-2 text-[11px] sm:text-sm font-medium whitespace-nowrap transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm flex items-center justify-center gap-1 sm:gap-1.5"
             >
-              <Layers className="mr-1.5 h-3.5 w-3.5 sm:mr-2 sm:h-4 sm:w-4" /> Bulk upload (PDF)
+              <Layers className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+              <span>Bulk <span className="hidden sm:inline">upload</span><span className="hidden md:inline"> (PDF)</span></span>
             </TabsTrigger>
           </TabsList>
         </div>
@@ -154,18 +183,18 @@ export default function ScanPage() {
           className={cn("space-y-6", activeTab !== "camera" && "hidden")}
         >
           <div className="grid gap-6 lg:grid-cols-2">
-            <Card className="card-premium border-border/60">
-              <CardHeader>
+            <Card className="card-premium border-border/60 overflow-hidden">
+              <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-4">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Camera className="h-4 w-4" /> 1. Live camera viewfinder
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-xs sm:text-sm">
                   Point camera at the physical fuel voucher stub and snap photo to auto-extract fields.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-0 sm:p-6">
                 {previewUrl ? (
-                  <div className="space-y-4">
+                  <div className="space-y-4 p-3 sm:p-0">
                     <div className="relative overflow-hidden rounded-lg border bg-muted">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
@@ -174,10 +203,18 @@ export default function ScanPage() {
                         className="mx-auto max-h-72 w-auto object-contain"
                       />
                       {progress != null && (
-                        <div className="absolute inset-x-0 bottom-0 space-y-1 bg-background/90 p-3">
-                          <div className="flex justify-between text-xs text-muted-foreground">
-                            <span>Running AI extraction…</span>
-                            <span>{progress}%</span>
+                        <div className="absolute inset-x-0 bottom-0 space-y-2 bg-background/95 p-3 backdrop-blur-sm border-t">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-medium text-foreground">Running AI extraction… {progress}%</span>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              className="h-6 px-2.5 text-[11px] gap-1 bg-red-600 hover:bg-red-700 text-white font-medium shadow-xs"
+                              onClick={handleCancelOcr}
+                            >
+                              <XCircle className="h-3 w-3" /> Stop / Cancel
+                            </Button>
                           </div>
                           <Progress value={progress} />
                         </div>
@@ -187,10 +224,10 @@ export default function ScanPage() {
                       type="button"
                       variant="outline"
                       onClick={handleClear}
-                      className="w-full h-11 rounded-xl gap-2 font-medium border-border/80 hover:border-primary/50"
+                      className="w-full h-11 rounded-xl gap-2 font-medium border-border/80 hover:border-primary/50 text-xs sm:text-sm"
                     >
-                      <Camera className="h-4 w-4 text-primary" />
-                      Scan Another Voucher
+                      <RotateCcw className="h-4 w-4 text-primary" />
+                      Cancel &amp; Scan / Upload Brand New Voucher
                     </Button>
                   </div>
                 ) : (
@@ -198,6 +235,7 @@ export default function ScanPage() {
                     onCapture={handleFile}
                     onCancel={() => setActiveTab("single")}
                     disabled={busy}
+                    active={activeTab === "camera"}
                   />
                 )}
               </CardContent>
@@ -211,7 +249,7 @@ export default function ScanPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <VoucherForm ocr={ocr} imageUrl={previewUrl} onSubmit={handleClear} />
+                <VoucherForm ocr={ocr} imageUrl={previewUrl} onSubmit={handleClear} onCancel={handleClear} />
                 {ocr && (
                   <>
                     <Separator className="my-4" />
@@ -245,6 +283,8 @@ export default function ScanPage() {
             <UploadZone
               onFileSelected={handleFile}
               onClear={handleClear}
+              onCancel={handleCancelOcr}
+              onStartCamera={() => setActiveTab("camera")}
               previewUrl={previewUrl}
               progress={progress}
               disabled={busy}
@@ -283,17 +323,17 @@ export default function ScanPage() {
           className={cn(activeTab !== "bulk" && "hidden")}
         >
           <Card className="card-premium border-border/60">
-            <CardHeader>
+            <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-4">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Layers className="h-4 w-4" /> Bulk voucher extraction
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-xs sm:text-sm">
                 Upload a PDF of scanned vouchers (or a photo of a ledger page). Every
                 distinct voucher entry is extracted for you to review and edit before
                 saving the batch.
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-2 sm:p-6">
               <BulkUpload />
             </CardContent>
           </Card>
